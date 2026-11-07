@@ -105,7 +105,7 @@ class Settings:
         "live_qualities": "",
         "original_quality": False,
         "douyin_platform": True,
-        "tiktok_platform": True,
+        "tiktok_platform": False,  # 本版本已删除 TikTok（海外版）功能
         "browser_info": {
             "impersonate": IMPERSONATE,
             "pc_libra_divert": "Mac",

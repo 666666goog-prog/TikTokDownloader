@@ -15,8 +15,6 @@ from src.custom import (
     PROJECT_NAME,
     RELEASES,
     REPOSITORY,
-    SERVER_HOST,
-    SERVER_PORT,
     TEXT_REPLACEMENT,
     VERSION_BETA,
     VERSION_MAJOR,
@@ -37,8 +35,6 @@ from src.tools import (
 )
 from src.translation import _, switch_language
 
-from .main_monitor import ClipboardMonitor
-from .main_server import APIServer
 from .main_terminal import TikTok
 
 # from typing import Type
@@ -114,12 +110,7 @@ class TikTokDownloader:
             (_("从剪贴板读取 Cookie (抖音)"), self.write_cookie_paste),
             # (_("从浏览器读取 Cookie (抖音)"), self.browser_cookie),
             # (_("扫码登录获取 Cookie (抖音)"), self.auto_cookie),
-            (_("手动输入 Cookie (TikTok)"), self.write_cookie_input_tiktok),
-            (_("从剪贴板读取 Cookie (TikTok)"), self.write_cookie_paste_tiktok),
-            # (_("从浏览器读取 Cookie (TikTok)"), self.browser_cookie_tiktok),
             (_("终端交互模式"), self.complete),
-            (_("后台监听模式"), self.monitor),
-            (_("Web API 模式"), self.server),
             (_("Web UI 模式"), self.disable_function),
             # (_("Web API 模式"), self.__api_object),
             # (_("Web UI 模式"), self.__web_ui_object),
@@ -148,24 +139,6 @@ class TikTokDownloader:
         self.console.warning(
             "该功能正在重构，未来开发完成重新开放！",
         )
-
-    async def server(self):
-        try:
-            self.console.print(
-                _(
-                    "访问 http://127.0.0.1:5555/docs 或者 http://127.0.0.1:5555/redoc 可以查阅 API 模式说明文档！"
-                ),
-                highlight=True,
-            )
-            await APIServer(
-                self.parameter,
-                self.database,
-            ).run_server(
-                SERVER_HOST,
-                SERVER_PORT,
-            )
-        except KeyboardInterrupt:
-            self.running = False
 
     async def __modify_record(self):
         await self.change_config("Record")
@@ -307,19 +280,6 @@ class TikTokDownloader:
         except KeyboardInterrupt:
             self.running = False
 
-    async def monitor(self):
-        await self.monitor_clipboard()
-
-    async def monitor_clipboard(self):
-        example = ClipboardMonitor(
-            self.parameter,
-            self.database,
-        )
-        try:
-            await example.run(self.run_command)
-        except (KeyboardInterrupt, CancelledError):
-            await example.stop_listener()
-
     async def change_config(
         self,
         key: str,
@@ -333,14 +293,8 @@ class TikTokDownloader:
     async def write_cookie_paste(self):
         await self.__write_cookie(tiktok=False)
 
-    async def write_cookie_paste_tiktok(self):
-        await self.__write_cookie(tiktok=True)
-
     async def write_cookie_input(self):
         await self.__write_cookie(False, False)
-
-    async def write_cookie_input_tiktok(self):
-        await self.__write_cookie(False, True)
 
     async def __write_cookie(self, read: bool = True, tiktok: bool = False):
         self.console.print(
