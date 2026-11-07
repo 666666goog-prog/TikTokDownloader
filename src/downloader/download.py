@@ -318,11 +318,30 @@ class Downloader:
                 item["desc"],
                 self.desc_length,
             )
-            name = self.generate_detail_name(item)
+            t = item["type"]
+            is_gallery = t == _("图集")
+            is_video = t == _("视频")
+            downloads = item.get("downloads") or []
+            image_count = (
+                len(downloads) if isinstance(downloads, (list, tuple)) else 0
+            )
+            # 图集作品（图片不少于 2 张）需要单独建文件夹并下载背景音乐
+            is_multi_gallery = is_gallery and image_count >= 2
+            if is_gallery or is_video:
+                name = self.generate_work_name(item)
+            else:
+                name = self.generate_detail_name(item)
+            if is_multi_gallery:
+                folder_mode = True
+            elif is_video:
+                # 纯单视频作品不建子文件夹，直接保存在根目录
+                folder_mode = False
+            else:
+                folder_mode = self.folder_mode
             temp_root, actual_root = self.deal_folder_path(
                 root,
                 name,
-                self.folder_mode and item["type"] in (_("图集"), _("实况")),
+                folder_mode,
             )
             params = {
                 "tasks": tasks,
@@ -332,13 +351,13 @@ class Downloader:
                 "temp_root": temp_root,
                 "actual_root": actual_root,
             }
-            if (t := item["type"]) == _("图集"):
+            if is_gallery:
                 await self.download_image(
                     **params,
                     type_=_("图集"),
                     skipped=count.skipped_image,
                 )
-            elif t == _("视频"):
+            elif is_video:
                 await self.download_video(
                     **params,
                     type_=_("视频"),
@@ -353,12 +372,23 @@ class Downloader:
                 )
             else:
                 raise DownloaderError
-            if item["type"] in (_("图集"), _("实况")):
-    self.download_music(
-        **params,
-        type=_("音乐"),
-    )
-
+            if is_video:
+                # 纯单视频作品不下载背景音乐
+                pass
+            elif is_multi_gallery:
+                # 图集的背景音乐与图片保存在同一个作品文件夹，
+                # 文件名沿用统一规则，序号排在全部图片之后
+                self.download_music(
+                    **params,
+                    type=_("音乐"),
+                    switch=True,
+                    seq=image_count + 1,
+                )
+            else:
+                self.download_music(
+                    **params,
+                    type=_("音乐"),
+                )
             self.download_cover(**params)
         await self.downloader_chart(
             tasks, count, self.general_progress_object(), **kwargs
@@ -482,7 +512,7 @@ class Downloader:
         if await self.is_skip(
             id_,
             p := actual_root.with_name(
-                f"{name}.{suffix}",
+                f"{name}_1.{suffix}",
             ),
         ):
             self.log.info(
@@ -496,7 +526,7 @@ class Downloader:
         tasks.append(
             (
                 item["downloads"],
-                temp_root.with_name(f"{name}.{suffix}"),
+                temp_root.with_name(f"{name}_1.{suffix}"),
                 p,
                 f"【{type_}】{name}",
                 id_,
@@ -516,17 +546,20 @@ class Downloader:
         switch: bool = False,
         suffix: str = "mp3",
         type_: str = _("音乐"),
+        seq: int = None,
         **kwargs,
     ) -> None:
+        # 传入序号时（图集背景音乐），文件名与其他作品文件保持同一命名规则
+        file_name = f"{name}_{seq}" if seq is not None else name
         if self.check_deal_music(
             url := item[key],
-            p := actual_root.with_name(f"{name}.{suffix}"),
+            p := actual_root.with_name(f"{file_name}.{suffix}"),
             switch,
         ):
             tasks.append(
                 (
                     url,
-                    temp_root.with_name(f"{name}.{suffix}"),
+                    temp_root.with_name(f"{file_name}.{suffix}"),
                     p,
                     _("【{type}】{name}").format(
                         type=type_,
@@ -829,6 +862,39 @@ class Downloader:
             ),
             length=self.name_length,
         )
+
+    def generate_work_name(self, data: dict) -> str:
+        """生成图集/视频作品文件名称：发布日期-作者-标题-作品ID
+
+        序号由各下载方法在该名称后统一追加（图片按张序、视频为 1、
+        图集背景音乐排在全部图片之后），保证所有作品文件名都包含
+        发布日期、作者、标题、作品 ID 与序号，不受 name_format
+        配置影响。
+        """
+        parts = (
+            self.__work_publish_date(data),
+            str(data.get("nickname") or data.get("uid") or ""),
+            str(data.get("desc") or ""),
+            str(data.get("id") or ""),
+        )
+        return beautify_string(
+            self.cleaner.filter_name(
+                self.split.join(i for i in parts if i),
+                str(data.get("id") or ""),
+            ),
+            length=self.name_length,
+        )
+
+    @staticmethod
+    def __work_publish_date(data: dict) -> str:
+        """提取作品发布日期（年月日）"""
+        if timestamp := data.get("create_timestamp"):
+            try:
+                return datetime.fromtimestamp(int(timestamp)).strftime("%Y-%m-%d")
+            except (TypeError, ValueError, OSError):
+                pass
+        create_time = str(data.get("create_time") or "")
+        return create_time[:10]
 
     def generate_music_name(self, data: dict) -> str:
         """生成音乐文件名称"""
