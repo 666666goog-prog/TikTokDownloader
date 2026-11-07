@@ -416,28 +416,40 @@ class Downloader:
                 )
             else:
                 raise DownloaderError
-            if await self.is_downloaded(item["id"]):
-                # 作品已有下载记录：图片/视频会整组跳过，背景音乐也
-                # 必须一起跳过。音乐原本只按“新路径下有没有同名文件”
-                # 判断，用户改过文件夹命名设置后再下载同一作品时，
-                # 旧音乐在新路径下找不到，就会被重复下载多份。
-                self.log.info(
-                    _("【{type}】{name} 已有下载记录，跳过背景音乐").format(
-                        type=_("音乐"), name=name
-                    )
-                )
-            elif is_video and self.video_root_mode:
+            # 背景音乐的跳过判断：作品有可信的下载记录（媒体文件
+            # 齐全，记录未被上面的自愈逻辑删除）时才连音乐一起跳过；
+            # 若记录还在、但音乐文件本身缺失（例如旧版本中途退出
+            # 留下的状态），仍要把音乐补下。download_music 内部还会
+            # 再按音乐文件是否存在判断一次，不会重复下载。
+            recorded_now = await self.is_downloaded(item["id"])
+            if is_video and self.video_root_mode:
                 # 纯单视频作品不下载背景音乐
                 pass
             elif needs_folder_music:
                 # 图集/实况/视频（按设置）的背景音乐与作品文件保存在
                 # 同一个作品文件夹，文件名沿用统一规则，序号排在
                 # 全部文件之后（视频本体占序号 1，音乐为序号 2）
-                self.download_music(
-                    **params,
-                    type=_("音乐"),
-                    switch=True,
-                    seq=(image_count if not is_video else 1) + 1,
+                seq = (image_count if not is_video else 1) + 1
+                if recorded_now and self.is_exists(
+                    actual_root.with_name(f"{name}_{seq}.mp3")
+                ):
+                    self.log.info(
+                        _("【{type}】{name} 已有下载记录，跳过背景音乐").format(
+                            type=_("音乐"), name=name
+                        )
+                    )
+                else:
+                    self.download_music(
+                        **params,
+                        type=_("音乐"),
+                        switch=True,
+                        seq=seq,
+                    )
+            elif recorded_now:
+                self.log.info(
+                    _("【{type}】{name} 已有下载记录，跳过背景音乐").format(
+                        type=_("音乐"), name=name
+                    )
                 )
             else:
                 self.download_music(
@@ -451,7 +463,33 @@ class Downloader:
         await self.downloader_chart(
             tasks, count, self.general_progress_object(), **kwargs
         )
+        await self.__record_completed_works(tasks)
         self.statistics_count(count)
+
+    async def __record_completed_works(self, tasks: list) -> None:
+        """整批下载结束后统一处理下载记录
+
+        一个作品的全部文件（封面、动图除外）都真实存在于目标
+        位置时，才把作品 ID 写入下载记录；只要有文件没下载
+        成功，就不写记录（并清掉可能残留的旧记录），下次运行
+        时缺失的文件会自动补下。这样程序中途退出不会再造成
+        “没下完却被记成已下载”的假记录。
+        """
+        by_work = {}
+        for t in tasks:
+            if str(t[3]).startswith(("【封面】", "【动图】")):
+                continue
+            by_work.setdefault(t[4], []).append(t[2])
+        for work_id, paths in by_work.items():
+            if all(i.exists() for i in paths):
+                await self.recorder.update_id(work_id)
+            else:
+                await self.recorder.delete_id(work_id)
+                self.log.info(
+                    _(
+                        "作品 {id} 未全部下载完成，不记入下载记录，下次将自动补下缺失文件"
+                    ).format(id=work_id)
+                )
 
     async def downloader_chart(
         self,
@@ -556,27 +594,24 @@ class Downloader:
                 )
             )
             return
+        recorded = await self.is_downloaded(id_)
+        added = 0
+        missing = 0
         for index, img in enumerate(
             item["downloads"],
             start=1,
         ):
-            if await self.is_downloaded(id_):
-                skipped.add(id_)
-                self.log.info(
-                    _("【{type}】{name} 存在下载记录，跳过下载").format(
-                        type=type_, name=name
-                    )
-                )
-                break
-            elif self.is_exists(p := actual_root.with_name(f"{name}_{index}.{suffix}")):
+            p = actual_root.with_name(f"{name}_{index}.{suffix}")
+            if self.is_exists(p):
                 self.log.info(
                     _("【{type}】{name}_{index} 文件已存在，跳过下载").format(
                         type=type_, name=name, index=index
                     )
                 )
                 self.log.info(f"文件路径: {p.resolve()}", False)
-                skipped.add(id_)
                 continue
+            missing += 1
+            added += 1
             tasks.append(
                 (
                     img,
@@ -587,6 +622,26 @@ class Downloader:
                     suffix,
                 )
             )
+        if recorded and not missing:
+            # 有下载记录且文件齐全：整个作品跳过
+            skipped.add(id_)
+            self.log.info(
+                _("【{type}】{name} 存在下载记录，跳过下载").format(
+                    type=type_, name=name
+                )
+            )
+        elif recorded and missing:
+            # 有下载记录但文件不全：多半是上次下载中途退出留下的
+            # 不可信记录。删掉它，只补下缺失的文件；全部补齐后
+            # batch_processing 会重新写入记录
+            await self.recorder.delete_id(id_)
+            self.log.info(
+                _("【{type}】{name} 上次没有下载完整，补下缺失的文件").format(
+                    type=type_, name=name
+                )
+            )
+        elif not added:
+            skipped.add(id_)
 
     async def download_video(
         self,
@@ -607,12 +662,10 @@ class Downloader:
                 )
             )
             return
-        if await self.is_skip(
-            id_,
-            p := actual_root.with_name(
-                f"{name}_1.{suffix}",
-            ),
-        ):
+        p = actual_root.with_name(
+            f"{name}_1.{suffix}",
+        )
+        if self.is_exists(p):
             self.log.info(
                 _("【{type}】{name} 存在下载记录或文件已存在，跳过下载").format(
                     type=type_, name=name
@@ -621,6 +674,15 @@ class Downloader:
             self.log.info(f"文件路径: {p.resolve()}", False)
             skipped.add(id_)
             return
+        if await self.is_downloaded(id_):
+            # 有下载记录但文件不在：上次没有下载完整，删掉不可信
+            # 的记录并重新下载
+            await self.recorder.delete_id(id_)
+            self.log.info(
+                _("【{type}】{name} 上次没有下载完整，重新下载").format(
+                    type=type_, name=name
+                )
+            )
         tasks.append(
             (
                 item["downloads"],
@@ -877,12 +939,15 @@ class Downloader:
                 _("{show} 下载中断，错误信息：{error}").format(show=show, error=e)
             )
             # self.delete_file(cache)
-            await self.recorder.delete_id(id_)
             return False
         self.save_file(cache, actual)
         self.log.info(_("{show} 文件下载成功").format(show=show))
         self.log.info(f"文件路径 {actual.resolve()}", False)
-        await self.recorder.update_id(id_)
+        # 注意：这里不再写入下载记录。以前单个文件下成功就把整个
+        # 作品记为已下载，多文件作品只下好第一个文件、程序中途
+        # 退出时，剩余文件会被误判为已下载而永远跳过。现在改由
+        # batch_processing 在整批下载结束后统一处理：作品的全部
+        # 文件都下载成功才写入记录。
         self.add_count(show, id_, count)
         return True
 
