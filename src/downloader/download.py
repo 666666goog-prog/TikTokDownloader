@@ -320,6 +320,7 @@ class Downloader:
             )
             t = item["type"]
             is_gallery = t == _("图集")
+            is_live = t == _("实况")
             is_video = t == _("视频")
             downloads = item.get("downloads") or []
             image_count = (
@@ -327,11 +328,16 @@ class Downloader:
             )
             # 图集作品（图片不少于 2 张）需要单独建文件夹并下载背景音乐
             is_multi_gallery = is_gallery and image_count >= 2
-            if is_gallery or is_video:
+            # 实况属于图文类作品，文件本身没有声音，它的声音就是
+            # 作品的背景音乐；因此实况不能按纯单视频处理（放根目录、
+            # 不下载音乐会得到无声文件），要和多图图集一样单独建
+            # 文件夹并把背景音乐一起下载，不受图片张数限制
+            needs_folder_music = is_multi_gallery or is_live
+            if is_gallery or is_video or is_live:
                 name = self.generate_work_name(item)
             else:
                 name = self.generate_detail_name(item)
-            if is_multi_gallery:
+            if needs_folder_music:
                 folder_mode = True
             elif is_video:
                 # 纯单视频作品不建子文件夹，直接保存在根目录
@@ -363,7 +369,7 @@ class Downloader:
                     type_=_("视频"),
                     skipped=count.skipped_video,
                 )
-            elif t == _("实况"):
+            elif is_live:
                 await self.download_image(
                     suffix="mp4",
                     type_=_("实况"),
@@ -375,9 +381,9 @@ class Downloader:
             if is_video:
                 # 纯单视频作品不下载背景音乐
                 pass
-            elif is_multi_gallery:
-                # 图集的背景音乐与图片保存在同一个作品文件夹，
-                # 文件名沿用统一规则，序号排在全部图片之后
+            elif needs_folder_music:
+                # 图集/实况的背景音乐与作品文件保存在同一个作品
+                # 文件夹，文件名沿用统一规则，序号排在全部文件之后
                 self.download_music(
                     **params,
                     type=_("音乐"),
@@ -864,7 +870,7 @@ class Downloader:
         )
 
     def generate_work_name(self, data: dict) -> str:
-        """生成图集/视频作品文件名称：发布日期-作者-标题-作品ID
+        """生成图集/实况/视频作品文件名称：发布日期-作者-标题-作品ID
 
         序号由各下载方法在该名称后统一追加（图片按张序、视频为 1、
         图集背景音乐排在全部图片之后），保证所有作品文件名都包含
