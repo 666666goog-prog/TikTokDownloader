@@ -117,6 +117,10 @@ class Parameter:
         album_threshold=2,
         live_folder_music=True,
         video_root_mode=True,
+        folder_show_date=True,
+        folder_show_type=True,
+        folder_show_title=False,
+        folder_show_id=True,
         **kwargs,
     ):
         self.settings = settings
@@ -198,6 +202,11 @@ class Parameter:
         self.album_threshold = self.__check_album_threshold(album_threshold)
         self.live_folder_music = self.check_bool_true(live_folder_music)
         self.video_root_mode = self.check_bool_true(video_root_mode)
+        # 作品文件夹命名开关
+        self.folder_show_date = self.check_bool_true(folder_show_date)
+        self.folder_show_type = self.check_bool_true(folder_show_type)
+        self.folder_show_title = self.check_bool_false(folder_show_title)
+        self.folder_show_id = self.check_bool_true(folder_show_id)
 
         self.impersonate = browser_info.pop(
             "impersonate",
@@ -277,6 +286,10 @@ class Parameter:
             "album_threshold": self.__check_album_threshold,
             "live_folder_music": self.check_bool_true,
             "video_root_mode": self.check_bool_true,
+            "folder_show_date": self.check_bool_true,
+            "folder_show_type": self.check_bool_true,
+            "folder_show_title": self.check_bool_false,
+            "folder_show_id": self.check_bool_true,
         }
         # self.__BROWSER_INFO = {
         #     "browser_info": None,
