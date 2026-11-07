@@ -322,7 +322,7 @@ class Downloader:
             temp_root, actual_root = self.deal_folder_path(
                 root,
                 name,
-                self.folder_mode,
+                self.folder_mode and item["type"] in (_("图集"), _("实况")),
             )
             params = {
                 "tasks": tasks,
@@ -353,10 +353,12 @@ class Downloader:
                 )
             else:
                 raise DownloaderError
-            self.download_music(
-                **params,
-                type=_("音乐"),
-            )
+            if item["type"] in (_("图集"), _("实况")):
+    self.download_music(
+        **params,
+        type=_("音乐"),
+    )
+
             self.download_cover(**params)
         await self.downloader_chart(
             tasks, count, self.general_progress_object(), **kwargs
