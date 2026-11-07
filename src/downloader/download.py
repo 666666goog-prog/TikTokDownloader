@@ -348,6 +348,13 @@ class Downloader:
                 root,
                 name,
                 folder_mode,
+                # 需要独立文件夹的作品（多图图集、实况）使用短文件夹名，
+                # 避免 Windows 路径过长导致保存失败
+                folder_name=(
+                    self.generate_folder_name(item)
+                    if needs_folder_music
+                    else None
+                ),
             )
             params = {
                 "tasks": tasks,
@@ -427,13 +434,34 @@ class Downloader:
         root: Path,
         name: str,
         folder_mode: bool = False,
+        folder_name: str = None,
     ) -> tuple[Path, Path]:
         """生成文件的临时路径和目标路径"""
-        root = self.create_detail_folder(root, name, folder_mode)
+        root = self.create_detail_folder(
+            root, folder_name or name, folder_mode
+        )
         root.mkdir(exist_ok=True)
         cache = self.cache.joinpath(name)
         actual = root.joinpath(name)
         return cache, actual
+
+    def generate_folder_name(self, data: dict) -> str:
+        """生成作品文件夹短名称：发布日期-作品ID
+
+        文件夹名不能直接使用完整的作品文件名：作品文件名本身较长
+        （日期-类型-作者-标题-作品ID），文件夹里还要再放一层同样
+        长的文件名，在 Windows 上整体路径很容易超过系统上限而导致
+        保存文件时报“系统找不到指定的路径”。文件夹只保留日期与
+        作品 ID 保证可定位，完整信息由里面的文件名承载。
+        """
+        parts = (
+            self.__work_publish_date(data),
+            str(data.get("id") or ""),
+        )
+        return self.cleaner.filter_name(
+            self.split.join(i for i in parts if i),
+            str(data.get("id") or ""),
+        )
 
     async def is_downloaded(self, id_: str) -> bool:
         return await self.recorder.has_id(id_)
@@ -557,6 +585,16 @@ class Downloader:
     ) -> None:
         # 传入序号时（图集背景音乐），文件名与其他作品文件保持同一命名规则
         file_name = f"{name}_{seq}" if seq is not None else name
+        if switch and not item[key]:
+            # 本应下载音乐（例如图集/实况的背景音乐），但平台没有为这个
+            # 作品返回可下载的音乐地址；明确提示原因，避免被误认为
+            # 程序漏下了音乐
+            self.log.warning(
+                _(
+                    "【{type}】{name} 平台未提供可下载的背景音乐地址，跳过音乐下载"
+                ).format(type=type_, name=name)
+            )
+            return
         if self.check_deal_music(
             url := item[key],
             p := actual_root.with_name(f"{file_name}.{suffix}"),
@@ -870,15 +908,16 @@ class Downloader:
         )
 
     def generate_work_name(self, data: dict) -> str:
-        """生成图集/实况/视频作品文件名称：发布日期-作者-标题-作品ID
+        """生成图集/实况/视频作品文件名称：发布日期-类型-作者-标题-作品ID
 
         序号由各下载方法在该名称后统一追加（图片按张序、视频为 1、
         图集背景音乐排在全部图片之后），保证所有作品文件名都包含
-        发布日期、作者、标题、作品 ID 与序号，不受 name_format
-        配置影响。
+        发布日期、作品类型、作者、标题、作品 ID 与序号，不受
+        name_format 配置影响。
         """
         parts = (
             self.__work_publish_date(data),
+            str(data.get("type") or ""),
             str(data.get("nickname") or data.get("uid") or ""),
             str(data.get("desc") or ""),
             str(data.get("id") or ""),
