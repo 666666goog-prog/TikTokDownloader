@@ -88,6 +88,13 @@ class Downloader:
             params, "live_folder_music", True
         )
         self.video_root_mode: bool = getattr(params, "video_root_mode", True)
+        # 作品文件夹命名开关（日期/类型/标题/ID 各自可开关）
+        self.folder_show_date: bool = getattr(params, "folder_show_date", True)
+        self.folder_show_type: bool = getattr(params, "folder_show_type", True)
+        self.folder_show_title: bool = getattr(
+            params, "folder_show_title", False
+        )
+        self.folder_show_id: bool = getattr(params, "folder_show_id", True)
         self.dynamic_cover: bool = params.dynamic_cover
         self.static_cover: bool = params.static_cover
         # self.cookie = params.cookie
@@ -363,12 +370,11 @@ class Downloader:
                 root,
                 name,
                 folder_mode,
-                # 需要独立文件夹的作品（多图图集、实况）使用短文件夹名，
+                # 只要这个作品要建独立文件夹，文件夹名就按命名开关
+                # 拼装（日期/类型/标题/ID），不直接套用完整文件名，
                 # 避免 Windows 路径过长导致保存失败
                 folder_name=(
-                    self.generate_folder_name(item)
-                    if needs_folder_music
-                    else None
+                    self.generate_folder_name(item) if folder_mode else None
                 ),
             )
             params = {
@@ -462,21 +468,34 @@ class Downloader:
         return cache, actual
 
     def generate_folder_name(self, data: dict) -> str:
-        """生成作品文件夹短名称：发布日期-作品ID
+        """生成作品文件夹名称：按开关拼装日期/类型/标题/ID
 
         文件夹名不能直接使用完整的作品文件名：作品文件名本身较长
         （日期-类型-作者-标题-作品ID），文件夹里还要再放一层同样
         长的文件名，在 Windows 上整体路径很容易超过系统上限而导致
-        保存文件时报“系统找不到指定的路径”。文件夹只保留日期与
-        作品 ID 保证可定位，完整信息由里面的文件名承载。
+        保存文件时报“系统找不到指定的路径”。因此文件夹名放哪些
+        内容由四个开关决定（folder_show_date/type/title/id，主菜单
+        “下载规则设置”里可改），默认只放日期、类型和作品 ID；
+        四项全部关闭时兜底使用作品 ID，保证文件夹名不会为空。
         """
-        parts = (
-            self.__work_publish_date(data),
-            str(data.get("id") or ""),
-        )
-        return self.cleaner.filter_name(
-            self.split.join(i for i in parts if i),
-            str(data.get("id") or ""),
+        parts = []
+        if self.folder_show_date:
+            parts.append(self.__work_publish_date(data))
+        if self.folder_show_type:
+            parts.append(str(data.get("type") or ""))
+        if self.folder_show_title:
+            parts.append(str(data.get("desc") or ""))
+        if self.folder_show_id:
+            parts.append(str(data.get("id") or ""))
+        parts = [i for i in parts if i]
+        if not parts:
+            parts = [str(data.get("id") or "")]
+        return beautify_string(
+            self.cleaner.filter_name(
+                self.split.join(parts),
+                str(data.get("id") or ""),
+            ),
+            length=self.name_length,
         )
 
     async def is_downloaded(self, id_: str) -> bool:
