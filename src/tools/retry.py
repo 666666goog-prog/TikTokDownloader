@@ -16,6 +16,12 @@ class Retry:
             for i in range(self.max_retry):
                 if result := await function(self, *args, **kwargs):
                     return result
+                # 被装饰的函数明确表示“重试也没用”时立刻停下：
+                # 例如下载被平台以 403 拒绝（仅朋友可见等权限限制），
+                # 同一地址短时间内连打多次只会把限制敲得更严
+                if getattr(self, "_no_more_retry", False):
+                    self._no_more_retry = False
+                    return result
                 self.log.warning(_("正在进行第 {index} 次重试").format(index=i + 1))
                 await wait()
             if not (result := await function(self, *args, **kwargs)) and finished:
