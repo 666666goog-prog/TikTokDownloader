@@ -185,27 +185,6 @@ class TikTok:
                 _("批量下载收藏夹作品(抖音)"),
                 self.collects_interactive,
             ),
-            (
-                _("批量下载账号作品(TikTok)"),
-                self.account_acquisition_interactive_tiktok,
-            ),
-            (
-                _("批量下载链接作品(TikTok)"),
-                self.detail_interactive_tiktok,
-            ),
-            (
-                _("批量下载合集作品(TikTok)"),
-                self.mix_interactive_tiktok,
-            ),
-            (
-                _("获取直播拉流地址(TikTok)"),
-                self.live_interactive_tiktok,
-            ),
-            # (_("采集作品评论数据(TikTok)"), self.comment_interactive_tiktok,),
-            # (
-            #     _("批量下载视频原画(TikTok)"),
-            #     self.detail_interactive_tiktok_unofficial,
-            # ),
         )
         self.__function_account = (
             (_("使用 accounts_urls 参数的账号链接(推荐)"), self.account_detail_batch),
