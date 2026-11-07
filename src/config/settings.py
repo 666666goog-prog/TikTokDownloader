@@ -78,6 +78,13 @@ class Settings:
         "live_folder_music": True,
         # video_root_mode：纯视频作品是否直接放根目录且不下载背景音乐
         "video_root_mode": True,
+        # 作品文件夹的名字里包含哪些内容（同样可在“下载规则设置”里改）：
+        # 日期、作品类型（图集/实况/视频）、作品标题、作品唯一 ID；
+        # 标题默认不放，文件夹名太长会在 Windows 上触发路径过长报错
+        "folder_show_date": True,
+        "folder_show_type": True,
+        "folder_show_title": False,
+        "folder_show_id": True,
         "truncate": 50,
         "storage_format": "",
         "cookie": "",
