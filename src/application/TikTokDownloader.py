@@ -423,9 +423,47 @@ class TikTokDownloader:
         threshold = self.parameter.album_threshold
         live = self.parameter.live_folder_music
         video_root = self.parameter.video_root_mode
+        folder_flags = {
+            "date": self.parameter.folder_show_date,
+            "type": self.parameter.folder_show_type,
+            "title": self.parameter.folder_show_title,
+            "id": self.parameter.folder_show_id,
+        }
+        split = data.get("split") or "-"
+
+        def folder_parts_text():
+            labels = {
+                "date": _("发布日期"),
+                "type": _("作品类型"),
+                "title": _("作品标题"),
+                "id": _("作品唯一ID"),
+            }
+            return "、".join(
+                labels[k] for k in ("date", "type", "title", "id")
+                if folder_flags[k]
+            ) or _("（全关了，自动只用作品唯一ID）")
+
+        def folder_example():
+            samples = {
+                "date": "2024-10-01",
+                "type": _("实况"),
+                "title": _("某个作品的标题"),
+                "id": "7345678901234567890",
+            }
+            parts = [
+                samples[k] for k in ("date", "type", "title", "id")
+                if folder_flags[k]
+            ]
+            return split.join(parts) if parts else samples["id"]
 
         def show_current():
             self.console.print(_("现在的规定是："))
+            self.console.print(
+                _("  作品文件夹的名字里放：{s}").format(s=folder_parts_text())
+            )
+            self.console.print(
+                _("  文件夹名举例：{s}").format(s=folder_example())
+            )
             self.console.print(
                 _(
                     "  图片作品：图片有 {n} 张或更多时，单独建一个文件夹，背景音乐一起下载"
@@ -494,9 +532,43 @@ class TikTokDownloader:
             video_root = False
         elif pick:
             self.console.warning(_("这个序号没看懂，视频这一项先不改。"))
+        folder_keys = ("date", "type", "title", "id")
+        folder_labels = {
+            "date": _("发布日期"),
+            "type": _("作品类型（是图集、实况还是视频，一眼能看出来）"),
+            "title": _(
+                "作品标题（提醒：标题太长时，可能会出现之前那种红色报错，保存失败）"
+            ),
+            "id": _("作品唯一ID（一串数字，每个作品都不一样，建议留着）"),
+        }
+        while True:
+            pick = choose(
+                _(
+                    "问题四：作品文件夹的名字里要放哪些东西？输入序号就能把那一项打开或关掉，可以反复改；直接按回车表示改完了"
+                ),
+                [
+                    f"{folder_labels[k]}：{_('开') if folder_flags[k] else _('关')}"
+                    for k in folder_keys
+                ],
+                self.console,
+            ).strip()
+            if not pick:
+                break
+            if pick not in ("1", "2", "3", "4"):
+                self.console.warning(_("这个序号没看懂，请重新选。"))
+                continue
+            key = folder_keys[int(pick) - 1]
+            folder_flags[key] = not folder_flags[key]
+            self.console.print(
+                _("现在文件夹名举例：{s}").format(s=folder_example())
+            )
         data["album_threshold"] = threshold
         data["live_folder_music"] = live
         data["video_root_mode"] = video_root
+        data["folder_show_date"] = folder_flags["date"]
+        data["folder_show_type"] = folder_flags["type"]
+        data["folder_show_title"] = folder_flags["title"]
+        data["folder_show_id"] = folder_flags["id"]
         self.settings.update(data)
         await self.check_settings()
         self.console.print(_("保存好了，新的规定马上生效："))
