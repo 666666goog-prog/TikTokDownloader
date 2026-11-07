@@ -793,6 +793,12 @@ class Extractor:
                     music_data,
                     f"play_url.url_list[{MUSIC_INDEX}]",
                 )  # 部分作品的音乐无法下载
+                if not url:
+                    # 备用地址：url_list 为空时，部分作品的 play_url.uri
+                    # 本身就是完整下载地址，尝试使用它挽回这类音乐
+                    uri = self.safe_extract(music_data, "play_url.uri")
+                    if isinstance(uri, str) and uri.startswith("http"):
+                        url = uri
 
         else:
             author, title, url = "", "", ""
