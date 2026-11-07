@@ -412,12 +412,13 @@ class TikTokDownloader:
         )
 
     async def download_rules_setting(self):
-        """下载规则设置（大白话版）
+        """下载规则设置
 
-        不用打开 settings.json 猜英文参数的意思，在菜单里回答几个
-        问题就能改：图片多少张建文件夹、实况和视频怎么存、文件夹
-        名字里放什么。保存后立即生效。
-        排版原则：一行只说一件事，段与段之间留空行，方便阅读。
+        在菜单里回答四个问题即可修改下载规则，保存后立即生效：
+        问题一 图片作品多少张起单独建文件夹并下载背景音乐；
+        问题二 实况作品的存法；问题三 视频作品的存法；
+        问题四 作品文件夹名包含哪些部分（开/关）。
+        页面内所有文字统一用同一种方式输出，保证颜色一致。
         """
         data = self.settings.read()
         threshold = self.parameter.album_threshold
@@ -431,6 +432,15 @@ class TikTokDownloader:
         }
         split = data.get("split") or "-"
         folder_keys = ("date", "type", "title", "id")
+        folder_names = {
+            "date": _("发布日期"),
+            "type": _("作品类型"),
+            "title": _("作品标题"),
+            "id": _("作品唯一 ID"),
+        }
+
+        def on_off(value):
+            return _("开") if value else _("关")
 
         def folder_example():
             samples = {
@@ -446,51 +456,40 @@ class TikTokDownloader:
 
         def show_current():
             self.console.print()
-            self.console.print(_("———— 现在的规定 ————"))
-            self.console.print()
+            self.console.print(_("现在的设置："))
             self.console.print(
-                _("图片：{n} 张起，建文件夹，带音乐").format(n=threshold)
+                _("图片作品：{n} 张及以上，单独建文件夹，下载背景音乐").format(
+                    n=threshold
+                )
             )
             self.console.print(
-                _("实况：{s}").format(
-                    s=_("建文件夹，带音乐")
+                _("实况作品：{s}").format(
+                    s=_("单独建文件夹，下载背景音乐")
                     if live
-                    else _("放根目录，不带音乐")
+                    else _("放根目录，不下载背景音乐")
                 )
             )
             self.console.print(
-                _("视频：{s}").format(
-                    s=_("放根目录，不带音乐")
+                _("视频作品：{s}").format(
+                    s=_("放根目录，不下载背景音乐")
                     if video_root
-                    else _("建文件夹，带音乐")
+                    else _("单独建文件夹，下载背景音乐")
                 )
             )
-            self.console.print()
-            self.console.print(_("文件夹名字里放："))
-            names = {
-                "date": _("发布日期"),
-                "type": _("作品类型"),
-                "title": _("作品标题"),
-                "id": _("作品唯一 ID"),
-            }
+            self.console.print(_("文件夹名包含："))
             for k in folder_keys:
                 self.console.print(
-                    "  {s}：{v}".format(
-                        s=names[k],
-                        v=_("放") if folder_flags[k] else _("不放"),
-                    )
+                    "  {s}：{v}".format(s=folder_names[k], v=on_off(folder_flags[k]))
                 )
             self.console.print(
-                _("文件夹名举例：{s}").format(s=folder_example())
+                _("文件夹名示例：{s}").format(s=folder_example())
             )
             self.console.print()
 
         show_current()
-        self.console.print(_("问题一：图片有几张时，建文件夹并带音乐？"))
-        self.console.print(_("（填 1 = 一张也算；填 3 = 三张起）"))
-        answer = self.console.input(
-            _("输入数字，回车 = 不改：")
-        ).strip()
+        self.console.print(_("问题一：图片作品多少张起，单独建文件夹并下载背景音乐？"))
+        self.console.print(_("现在是 {n} 张。").format(n=threshold))
+        answer = self.console.input(_("输入数字修改，回车不改：")).strip()
         if answer:
             try:
                 value = int(answer)
@@ -498,72 +497,51 @@ class TikTokDownloader:
                     raise ValueError
                 threshold = value
             except ValueError:
-                self.console.warning(_("没看懂，这个先不改。"))
+                self.console.warning(_("输入不正确，这一项不改。"))
         self.console.print()
-        pick = choose(
-            _("问题二：实况怎么存？（回车 = 不改）"),
-            [
-                _("建文件夹，带音乐（推荐）"),
-                _("放根目录，不带音乐（会没声音）"),
-            ],
-            self.console,
-        ).strip()
+        self.console.print(_("问题二：实况作品怎么存？"))
+        self.console.print(_("  1. 单独建文件夹，下载背景音乐（推荐）"))
+        self.console.print(_("  2. 放根目录，不下载背景音乐（实况会没有声音）"))
+        pick = self.console.input(_("输入序号，回车不改：")).strip()
         if pick == "1":
             live = True
         elif pick == "2":
             live = False
         elif pick:
-            self.console.warning(_("没看懂，这个先不改。"))
+            self.console.warning(_("输入不正确，这一项不改。"))
         self.console.print()
-        pick = choose(
-            _("问题三：视频怎么存？（回车 = 不改）"),
-            [
-                _("放根目录，不带音乐"),
-                _("建文件夹，带音乐"),
-            ],
-            self.console,
-        ).strip()
+        self.console.print(_("问题三：视频作品怎么存？"))
+        self.console.print(_("  1. 放根目录，不下载背景音乐"))
+        self.console.print(_("  2. 单独建文件夹，下载背景音乐"))
+        pick = self.console.input(_("输入序号，回车不改：")).strip()
         if pick == "1":
             video_root = True
         elif pick == "2":
             video_root = False
         elif pick:
-            self.console.warning(_("没看懂，这个先不改。"))
+            self.console.warning(_("输入不正确，这一项不改。"))
         self.console.print()
-        self.console.print(_("问题四：文件夹名字里放什么？"))
-        self.console.print(_("输入序号 = 打开或关掉那一项，可反复改。"))
-        self.console.print(_("回车 = 改完了。"))
-        self.console.print(_("小提醒：标题放进去，名字会变长，"))
-        self.console.print(_("个别作品可能又出现红色报错。"))
-        short_labels = {
-            "date": _("发布日期"),
-            "type": _("作品类型"),
-            "title": _("作品标题"),
-            "id": _("作品唯一 ID"),
-        }
+        self.console.print(_("问题四：文件夹名包含哪些部分？"))
+        self.console.print(_("输入序号切换开/关，可以反复修改，回车结束。"))
+        self.console.print(_("提示：标题开启后文件夹名变长，个别作品可能保存失败。"))
         while True:
-            pick = choose(
-                _("现在是这样："),
-                [
-                    "{s}：{v}".format(
-                        s=short_labels[k],
-                        v=_("放") if folder_flags[k] else _("不放"),
+            for i, k in enumerate(folder_keys, start=1):
+                self.console.print(
+                    "  {i}. {s}：{v}".format(
+                        i=i, s=folder_names[k], v=on_off(folder_flags[k])
                     )
-                    for k in folder_keys
-                ],
-                self.console,
-            ).strip()
+                )
+            pick = self.console.input(_("输入序号，回车结束：")).strip()
             if not pick:
                 break
             if pick not in ("1", "2", "3", "4"):
-                self.console.warning(_("没看懂，请重新选。"))
+                self.console.warning(_("输入不正确，请重新选。"))
                 continue
             key = folder_keys[int(pick) - 1]
             folder_flags[key] = not folder_flags[key]
             self.console.print(
-                _("改好了，文件夹名举例：{s}").format(s=folder_example())
+                _("文件夹名示例：{s}").format(s=folder_example())
             )
-            self.console.print()
         data["album_threshold"] = threshold
         data["live_folder_music"] = live
         data["video_root_mode"] = video_root
@@ -574,7 +552,7 @@ class TikTokDownloader:
         self.settings.update(data)
         await self.check_settings()
         self.console.print()
-        self.console.print(_("保存好了，新规定马上生效。"))
+        self.console.print(_("已保存，立即生效。"))
         show_current()
 
     async def check_settings(self, restart=True):
