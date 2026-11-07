@@ -376,7 +376,11 @@ class Downloader:
                 folder_name=(
                     self.generate_folder_name(item) if folder_mode else None
                 ),
+                # 先不创建文件夹：等这个作品确实有文件要下载时再建，
+                # 避免作品全部跳过（比如已有下载记录）时留下空文件夹
+                create=False,
             )
+            tasks_before = len(tasks)
             params = {
                 "tasks": tasks,
                 "name": name,
@@ -435,6 +439,9 @@ class Downloader:
                     type=_("音乐"),
                 )
             self.download_cover(**params)
+            if folder_mode and len(tasks) > tasks_before:
+                # 这个作品确实有文件要下载，现在才创建它的文件夹
+                actual_root.parent.mkdir(parents=True, exist_ok=True)
         await self.downloader_chart(
             tasks, count, self.general_progress_object(), **kwargs
         )
@@ -467,12 +474,18 @@ class Downloader:
         name: str,
         folder_mode: bool = False,
         folder_name: str = None,
+        create: bool = True,
     ) -> tuple[Path, Path]:
-        """生成文件的临时路径和目标路径"""
+        """生成文件的临时路径和目标路径
+
+        create=False 时不在此处创建作品文件夹，由调用方在本作品
+        确实产生下载任务后再创建，避免作品全部跳过时留下空文件夹。
+        """
         root = self.create_detail_folder(
             root, folder_name or name, folder_mode
         )
-        root.mkdir(exist_ok=True)
+        if create:
+            root.mkdir(exist_ok=True)
         cache = self.cache.joinpath(name)
         actual = root.joinpath(name)
         return cache, actual
