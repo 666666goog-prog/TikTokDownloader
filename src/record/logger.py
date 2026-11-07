@@ -56,12 +56,12 @@ class LoggerManager(BaseLogger):
         self.log.info(text.strip())
 
     def warning(self, text: str, output=True, **kwargs):
-        if output:
+        if output and not getattr(self, "console_muted", False):
             self.console.print(text, style=WARNING, **kwargs)
         self.log.warning(text.strip())
 
     def error(self, text: str, output=True, **kwargs):
-        if output:
+        if output and not getattr(self, "console_muted", False):
             self.console.print(text, style=ERROR, **kwargs)
         self.log.error(text.strip())
 

@@ -97,8 +97,10 @@ class TikTokDownloader:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.database.__aexit__(exc_type, exc_val, exc_tb)
         if self.parameter:
-            await self.parameter.close_client()
+            # 先停后台更新线程，再关网络客户端：顺序反过来，
+            # 退出时就不会再有更新请求在关机途中超时报错
             self.close()
+            await self.parameter.close_client()
 
     def __update_menu(self):
         options = {
@@ -642,7 +644,10 @@ class TikTokDownloader:
         async def inner():
             while not self.event_cookie.is_set():
                 await self.parameter.update_params()
-                self.event_cookie.wait(COOKIE_UPDATE_INTERVAL)
+                # 等待 15 分钟再更新一次；退出时 event 被置位，
+                # wait 会立刻返回 True，直接结束循环，不再发新请求
+                if self.event_cookie.wait(COOKIE_UPDATE_INTERVAL):
+                    break
 
         run(
             inner(),
@@ -657,12 +662,25 @@ class TikTokDownloader:
             while self.params_task.is_alive():
                 # print("等待子线程结束！")  # 调试代码
                 sleep(1)
-        self.params_task = Thread(target=self.periodic_update_params)
+        # 后台线程设为守护线程：正在进行的更新万一卡住，
+        # 也不会拖住程序退出
+        self.params_task = Thread(
+            target=self.periodic_update_params, daemon=True
+        )
         self.event_cookie.clear()
         self.params_task.start()
 
     def close(self):
         self.event_cookie.set()
+        # 先停掉后台参数更新线程：等它收尾（最多 5 秒），
+        # 再关网络客户端，避免退出时更新请求和关机撞在一起
+        # 冒出红色的 curl (28) 请求超时
+        if self.params_task is not None and self.params_task.is_alive():
+            self.params_task.join(timeout=5)
+        if self.params_task is not None and self.params_task.is_alive():
+            # 更新请求还卡在网络上（最长会等到 30 秒超时）：程序先
+            # 退出，它的报错只写进日志文件，不再往屏幕上打红字
+            self.logger.console_muted = True
         if self.parameter.folder_mode:
             remove_empty_directories(self.parameter.ROOT)
             remove_empty_directories(self.parameter.root)

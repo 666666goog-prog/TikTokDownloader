@@ -332,6 +332,9 @@ class Downloader:
             skipped_live=set(),
         )
         tasks = []
+        # 本批被平台以 403 拒绝的作品（多半是仅朋友可见等权限限制）：
+        # 最后写记录时单独提示，和普通“没下完”区分开
+        self.forbidden_works = set()
         # 作品 ID →（作者 UID，作者昵称）：下载完成后写记录时顺带记下，
         # 这样主菜单「删除作者下载记录」才能按作者汇总、按作者删除。
         # 旧版本下载的作品记录里没有作者信息，不会出现在作者列表里。
@@ -441,7 +444,7 @@ class Downloader:
                 # 同一个作品文件夹，文件名沿用统一规则，序号排在
                 # 全部文件之后（视频本体占序号 1，音乐为序号 2）
                 seq = (image_count if not is_video else 1) + 1
-                if recorded_now and self.is_exists(
+                if recorded_now and self.file_exists_any_suffix(
                     actual_root.with_name(f"{name}_{seq}.mp3")
                 ):
                     self.log.info(
@@ -452,7 +455,7 @@ class Downloader:
                 else:
                     self.download_music(
                         **params,
-                        type=_("音乐"),
+                        type_=_("音乐"),
                         switch=True,
                         seq=seq,
                     )
@@ -465,7 +468,7 @@ class Downloader:
             else:
                 self.download_music(
                     **params,
-                    type=_("音乐"),
+                    type_=_("音乐"),
                 )
             self.download_cover(**params)
             if folder_mode and len(tasks) > tasks_before:
@@ -494,18 +497,25 @@ class Downloader:
                 continue
             by_work.setdefault(t[4], []).append(t[2])
         for work_id, paths in by_work.items():
-            if all(i.exists() for i in paths):
+            if all(self.file_exists_any_suffix(i) for i in paths):
                 author_uid, author_name = (work_authors or {}).get(
                     work_id, ("", "")
                 )
                 await self.recorder.update_id(work_id, author_uid, author_name)
             else:
                 await self.recorder.delete_id(work_id)
-                self.log.info(
-                    _(
-                        "作品 {id} 未全部下载完成，不记入下载记录，下次将自动补下缺失文件"
-                    ).format(id=work_id)
-                )
+                if work_id in getattr(self, "forbidden_works", set()):
+                    self.log.info(
+                        _(
+                            "作品 {id} 被平台拒绝下载（403），可能是仅朋友可见等权限限制，无法下载"
+                        ).format(id=work_id)
+                    )
+                else:
+                    self.log.info(
+                        _(
+                            "作品 {id} 未全部下载完成，不记入下载记录，下次将自动补下缺失文件"
+                        ).format(id=work_id)
+                    )
 
     async def downloader_chart(
         self,
@@ -587,6 +597,22 @@ class Downloader:
     @staticmethod
     def is_exists(path: Path) -> bool:
         return path.exists()
+
+    @staticmethod
+    def file_exists_any_suffix(path: Path) -> bool:
+        """同名文件是否存在（不看后缀）
+
+        文件真正保存时，后缀以服务器返回的类型为准（request_file
+        里用 actual.with_suffix(真实后缀)），可能和计划的后缀不同
+        （例如背景音乐计划 .mp3、实际存成 .m4a）。只按计划路径查
+        在否，会把已下载成功的文件误判为缺失。
+        """
+        if path.exists():
+            return True
+        try:
+            return any(path.parent.glob(f"{path.stem}.*"))
+        except OSError:
+            return False
 
     async def is_skip(self, id_: str, path: Path) -> bool:
         return await self.is_downloaded(id_) or self.is_exists(path)
@@ -814,7 +840,9 @@ class Downloader:
         switch: bool = False,
     ) -> bool:
         """未传入 switch 参数则判断音乐下载开关设置"""
-        return all((switch or self.music, url, not self.is_exists(path)))
+        return all(
+            (switch or self.music, url, not self.file_exists_any_suffix(path))
+        )
 
     @Retry.retry
     async def request_file(
@@ -897,11 +925,29 @@ class Downloader:
                 self.log.warning(
                     _("响应码异常: {error_repr}").format(error_repr=repr(e))
                 )
-                self.console.warning(
-                    _(
-                        "如果 TikTok 平台作品下载功能异常，请检查配置文件中 browser_info_tiktok 的 device_id 参数！"
-                    ),
-                )
+                if tiktok:
+                    self.console.warning(
+                        _(
+                            "如果 TikTok 平台作品下载功能异常，请检查配置文件中 browser_info_tiktok 的 device_id 参数！"
+                        ),
+                    )
+                elif "403" in str(e):
+                    # 本程序只下载抖音，抖音链接被服务器拒绝（403）时
+                    # 与 TikTok 无关，不再显示原版那句会误导人的提示。
+                    # 403 是服务器明确拒绝，多为链接过期、触发平台
+                    # 限制或作品本身有权限限制（如仅朋友可见）：同一
+                    # 地址短时间内反复重试不会成功，还可能把限制敲
+                    # 得更严，置上 _no_more_retry 让重试器立刻停下，
+                    # 并记下作品 ID，最后按权限限制单独提示
+                    self._no_more_retry = True
+                    if not hasattr(self, "forbidden_works"):
+                        self.forbidden_works = set()
+                    self.forbidden_works.add(id_)
+                    self.console.warning(
+                        _(
+                            "平台拒绝了这次下载请求（403），可能是链接过期、触发平台限制，或作品有权限限制（如仅朋友可见）。"
+                        ),
+                    )
                 return False
             except RequestException as e:
                 self.log.warning(_("网络异常: {error_repr}").format(error_repr=repr(e)))
