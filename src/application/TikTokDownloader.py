@@ -371,7 +371,8 @@ class TikTokDownloader:
         在菜单里回答四个问题即可修改下载规则，保存后立即生效：
         问题一 图片作品多少张起单独建文件夹并下载背景音乐；
         问题二 实况作品的存法；问题三 视频作品的存法；
-        问题四 作品文件夹名包含哪些部分（开/关）。
+        问题四 作品文件夹名包含哪些部分（开/关）；
+        问题五 作品文件名包含哪些部分（开/关，与问题四分开）。
         页面内所有文字统一用同一种方式输出，保证颜色一致。
         """
         data = self.settings.read()
@@ -392,6 +393,21 @@ class TikTokDownloader:
             "title": _("作品标题"),
             "id": _("作品唯一 ID"),
         }
+        file_flags = {
+            "date": self.parameter.file_show_date,
+            "type": self.parameter.file_show_type,
+            "author": self.parameter.file_show_author,
+            "title": self.parameter.file_show_title,
+            "id": self.parameter.file_show_id,
+        }
+        file_keys = ("date", "type", "author", "title", "id")
+        file_names = {
+            "date": _("发布日期"),
+            "type": _("作品类型"),
+            "author": _("作者"),
+            "title": _("作品标题"),
+            "id": _("作品唯一 ID"),
+        }
 
         def on_off(value):
             return _("开") if value else _("关")
@@ -407,6 +423,20 @@ class TikTokDownloader:
                 samples[k] for k in folder_keys if folder_flags[k]
             ]
             return split.join(parts) if parts else samples["id"]
+
+        def file_example():
+            samples = {
+                "date": "2024-10-01",
+                "type": _("实况"),
+                "author": _("作者昵称"),
+                "title": _("某个作品的标题"),
+                "id": "7345678901234567890",
+            }
+            parts = [
+                samples[k] for k in file_keys if file_flags[k]
+            ]
+            name = split.join(parts) if parts else samples["id"]
+            return f"{name}_1"
 
         def show_current():
             self.console.print()
@@ -437,6 +467,14 @@ class TikTokDownloader:
                 )
             self.console.print(
                 _("文件夹名示例：{s}").format(s=folder_example())
+            )
+            self.console.print(_("文件名包含："))
+            for k in file_keys:
+                self.console.print(
+                    "  {s}：{v}".format(s=file_names[k], v=on_off(file_flags[k]))
+                )
+            self.console.print(
+                _("文件名示例：{s}").format(s=file_example())
             )
             self.console.print()
 
@@ -496,6 +534,29 @@ class TikTokDownloader:
             self.console.print(
                 _("文件夹名示例：{s}").format(s=folder_example())
             )
+        self.console.print()
+        self.console.print(_("问题五：文件名包含哪些部分？"))
+        self.console.print(_("和问题四分开设置，互不影响。"))
+        self.console.print(_("输入序号切换开/关，可以反复修改，回车结束。"))
+        self.console.print(_("说明：文件名最后的序号始终保留，用来区分第几张图。"))
+        while True:
+            for i, k in enumerate(file_keys, start=1):
+                self.console.print(
+                    "  {i}. {s}：{v}".format(
+                        i=i, s=file_names[k], v=on_off(file_flags[k])
+                    )
+                )
+            pick = self.console.input(_("输入序号，回车结束：")).strip()
+            if not pick:
+                break
+            if pick not in ("1", "2", "3", "4", "5"):
+                self.console.warning(_("输入不正确，请重新选。"))
+                continue
+            key = file_keys[int(pick) - 1]
+            file_flags[key] = not file_flags[key]
+            self.console.print(
+                _("文件名示例：{s}").format(s=file_example())
+            )
         data["album_threshold"] = threshold
         data["live_folder_music"] = live
         data["video_root_mode"] = video_root
@@ -503,6 +564,11 @@ class TikTokDownloader:
         data["folder_show_type"] = folder_flags["type"]
         data["folder_show_title"] = folder_flags["title"]
         data["folder_show_id"] = folder_flags["id"]
+        data["file_show_date"] = file_flags["date"]
+        data["file_show_type"] = file_flags["type"]
+        data["file_show_author"] = file_flags["author"]
+        data["file_show_title"] = file_flags["title"]
+        data["file_show_id"] = file_flags["id"]
         self.settings.update(data)
         await self.check_settings()
         self.console.print()
