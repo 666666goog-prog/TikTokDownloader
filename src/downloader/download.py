@@ -332,6 +332,7 @@ class Downloader:
             skipped_live=set(),
         )
         tasks = []
+        used_names = {}
         # 本批被平台以 403 拒绝的作品（多半是仅朋友可见等权限限制）：
         # 最后写记录时单独提示，和普通“没下完”区分开
         self.forbidden_works = set()
@@ -379,6 +380,13 @@ class Downloader:
                 name = self.generate_work_name(item)
             else:
                 name = self.generate_detail_name(item)
+            # 同批撞名保护：同一作者同一天发布多个无标题（或同标题）
+            # 作品时，拼出的文件名会完全相同，后下的会被误当成
+            # “文件已存在”跳过。先到先得保留原名，撞名的后续作品
+            # 在名字后追加自己的作品 ID 区分（只影响真撞名的情况）
+            if name in used_names and used_names[name] != item["id"]:
+                name = f"{name}{self.split}{item['id']}"
+            used_names[name] = item["id"]
             if needs_folder_music:
                 folder_mode = True
             elif is_video and self.video_root_mode:
@@ -577,7 +585,7 @@ class Downloader:
         if self.folder_show_type:
             parts.append(str(data.get("type") or ""))
         if self.folder_show_title:
-            parts.append(str(data.get("desc") or ""))
+            parts.append(self.__display_title(data))
         if self.folder_show_id:
             parts.append(str(data.get("id") or ""))
         parts = [i for i in parts if i]
@@ -1088,11 +1096,28 @@ class Downloader:
         folder.mkdir(exist_ok=True)
         return folder
 
+    @staticmethod
+    def __display_title(data: dict) -> str:
+        """文件名/文件夹名里用的标题
+
+        提取数据时，作者没写任何描述的作品，其 desc 被原版逻辑
+        兜底成了作品 ID（一串长数字）。命名时把这种情况显示为
+        “无标题”，不再把长串 ID 摆在标题的位置上；作品数据本身
+        不动，其他地方（日志、统计）不受影响。
+        """
+        desc = str(data.get("desc") or "")
+        if not desc or desc == str(data.get("id") or ""):
+            return "无标题"
+        return desc
+
     def generate_detail_name(self, data: dict) -> str:
         """生成作品文件名称"""
         return beautify_string(
             self.cleaner.filter_name(
-                self.split.join(data[i] for i in self.name_format),
+                self.split.join(
+                    self.__display_title(data) if i == "desc" else data[i]
+                    for i in self.name_format
+                ),
                 data["id"],
             ),
             length=self.name_length,
@@ -1116,7 +1141,7 @@ class Downloader:
         if self.file_show_author:
             parts.append(str(data.get("nickname") or data.get("uid") or ""))
         if self.file_show_title:
-            parts.append(str(data.get("desc") or ""))
+            parts.append(self.__display_title(data))
         if self.file_show_id:
             parts.append(str(data.get("id") or ""))
         parts = [i for i in parts if i]
