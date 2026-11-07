@@ -195,9 +195,9 @@ class Parameter:
         self.douyin_platform = self.check_bool_true(
             douyin_platform,
         )
-        self.tiktok_platform = self.check_bool_true(
-            tiktok_platform,
-        )
+        # 本版本已删除 TikTok（海外版）下载功能，平台开关强制关闭，
+        # 即使旧配置文件里写的是 true 也不再生效
+        self.tiktok_platform = False
         # 自定义下载规则（主菜单“下载规则设置”可修改）
         self.album_threshold = self.__check_album_threshold(album_threshold)
         self.live_folder_music = self.check_bool_true(live_folder_music)
