@@ -120,7 +120,12 @@ class Parameter:
         folder_show_date=True,
         folder_show_type=True,
         folder_show_title=False,
-        folder_show_id=True,
+        folder_show_id=False,
+        file_show_date=True,
+        file_show_type=True,
+        file_show_author=True,
+        file_show_title=True,
+        file_show_id=False,
         **kwargs,
     ):
         self.settings = settings
@@ -206,7 +211,12 @@ class Parameter:
         self.folder_show_date = self.check_bool_true(folder_show_date)
         self.folder_show_type = self.check_bool_true(folder_show_type)
         self.folder_show_title = self.check_bool_false(folder_show_title)
-        self.folder_show_id = self.check_bool_true(folder_show_id)
+        self.folder_show_id = self.check_bool_false(folder_show_id)
+        self.file_show_date = self.check_bool_true(file_show_date)
+        self.file_show_type = self.check_bool_true(file_show_type)
+        self.file_show_author = self.check_bool_true(file_show_author)
+        self.file_show_title = self.check_bool_true(file_show_title)
+        self.file_show_id = self.check_bool_false(file_show_id)
 
         self.impersonate = browser_info.pop(
             "impersonate",
@@ -289,7 +299,12 @@ class Parameter:
             "folder_show_date": self.check_bool_true,
             "folder_show_type": self.check_bool_true,
             "folder_show_title": self.check_bool_false,
-            "folder_show_id": self.check_bool_true,
+            "folder_show_id": self.check_bool_false,
+            "file_show_date": self.check_bool_true,
+            "file_show_type": self.check_bool_true,
+            "file_show_author": self.check_bool_true,
+            "file_show_title": self.check_bool_true,
+            "file_show_id": self.check_bool_false,
         }
         # self.__BROWSER_INFO = {
         #     "browser_info": None,
