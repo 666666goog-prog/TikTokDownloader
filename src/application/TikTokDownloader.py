@@ -134,6 +134,10 @@ class TikTokDownloader:
             ),
             (_("检查程序版本更新"), self.check_update),
             (_("切换语言"), self._switch_language),
+            (
+                _("下载规则设置（图片几张建文件夹、实况和视频怎么存）"),
+                self.download_rules_setting,
+            ),
         )
 
     async def disable_function(
@@ -406,6 +410,97 @@ class TikTokDownloader:
         self.console.info(
             "删除作品下载记录成功！",
         )
+
+    async def download_rules_setting(self):
+        """下载规则设置（大白话版）
+
+        不用打开 settings.json 逐项猜英文参数的意思，在菜单里回答
+        三个问题即可修改图片作品、实况作品、纯视频作品的下载规则；
+        保存到配置文件的 album_threshold、live_folder_music、
+        video_root_mode 三个参数后立即生效。
+        """
+        data = self.settings.read()
+        threshold = self.parameter.album_threshold
+        live = self.parameter.live_folder_music
+        video_root = self.parameter.video_root_mode
+
+        def show_current():
+            self.console.print(_("现在的规定是："))
+            self.console.print(
+                _(
+                    "  图片作品：图片有 {n} 张或更多时，单独建一个文件夹，背景音乐一起下载"
+                ).format(n=threshold)
+            )
+            self.console.print(
+                _(
+                    "  实况作品：{s}"
+                ).format(
+                    s=_("单独建一个文件夹，背景音乐一起下载")
+                    if live
+                    else _("直接放根目录，不下载背景音乐")
+                )
+            )
+            self.console.print(
+                _(
+                    "  纯视频作品：{s}"
+                ).format(
+                    s=_("直接放根目录，不下载背景音乐")
+                    if video_root
+                    else _("单独建一个文件夹，背景音乐一起下载")
+                )
+            )
+
+        show_current()
+        answer = self.console.input(
+            _(
+                "问题一：图片达到几张时，单独建文件夹并下载背景音乐？输入一个数字（比如填 1，一张图片也这样处理；填 3，三张起才这样），直接按回车表示不改："
+            )
+        ).strip()
+        if answer:
+            try:
+                value = int(answer)
+                if not 1 <= value <= 999:
+                    raise ValueError
+                threshold = value
+            except ValueError:
+                self.console.warning(
+                    _("这个数字没看懂，图片张数这一项先不改。"),
+                )
+        pick = choose(
+            _("问题二：实况作品怎么处理？输入序号，直接按回车表示不改"),
+            [
+                _("单独建一个文件夹，背景音乐一起下载（推荐：实况本身没有声音，声音就是背景音乐）"),
+                _("直接放根目录，不下载背景音乐（下下来的实况会没有声音）"),
+            ],
+            self.console,
+        ).strip()
+        if pick == "1":
+            live = True
+        elif pick == "2":
+            live = False
+        elif pick:
+            self.console.warning(_("这个序号没看懂，实况这一项先不改。"))
+        pick = choose(
+            _("问题三：纯视频作品怎么处理？输入序号，直接按回车表示不改"),
+            [
+                _("直接放根目录，不下载背景音乐（视频本身有声音）"),
+                _("单独建一个文件夹，背景音乐一起下载"),
+            ],
+            self.console,
+        ).strip()
+        if pick == "1":
+            video_root = True
+        elif pick == "2":
+            video_root = False
+        elif pick:
+            self.console.warning(_("这个序号没看懂，视频这一项先不改。"))
+        data["album_threshold"] = threshold
+        data["live_folder_music"] = live
+        data["video_root_mode"] = video_root
+        self.settings.update(data)
+        await self.check_settings()
+        self.console.print(_("保存好了，新的规定马上生效："))
+        show_current()
 
     async def check_settings(self, restart=True):
         if restart:

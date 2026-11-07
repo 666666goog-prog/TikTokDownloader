@@ -114,6 +114,9 @@ class Parameter:
         timeout=10,
         douyin_platform=True,
         tiktok_platform=True,
+        album_threshold=2,
+        live_folder_music=True,
+        video_root_mode=True,
         **kwargs,
     ):
         self.settings = settings
@@ -191,6 +194,10 @@ class Parameter:
         self.tiktok_platform = self.check_bool_true(
             tiktok_platform,
         )
+        # 自定义下载规则（主菜单“下载规则设置”可修改）
+        self.album_threshold = self.__check_album_threshold(album_threshold)
+        self.live_folder_music = self.check_bool_true(live_folder_music)
+        self.video_root_mode = self.check_bool_true(video_root_mode)
 
         self.impersonate = browser_info.pop(
             "impersonate",
@@ -267,6 +274,9 @@ class Parameter:
             "original_quality": self.check_bool_false,
             "douyin_platform": self.check_bool_true,
             "tiktok_platform": self.check_bool_true,
+            "album_threshold": self.__check_album_threshold,
+            "live_folder_music": self.check_bool_true,
+            "video_root_mode": self.check_bool_true,
         }
         # self.__BROWSER_INFO = {
         #     "browser_info": None,
@@ -528,6 +538,21 @@ class Parameter:
             1024 * 128,
             1024 * 1024 * 2,
         )
+
+    @staticmethod
+    def __check_album_threshold(album_threshold: int) -> int:
+        """校验图片作品建文件夹/下载音乐的图片张数门槛
+
+        必须是大于等于 1 的整数（布尔值除外），否则使用默认值 2；
+        过大的数值没有实际意义，上限为 999。
+        """
+        if (
+            isinstance(album_threshold, int)
+            and not isinstance(album_threshold, bool)
+            and 1 <= album_threshold <= 999
+        ):
+            return album_threshold
+        return 2
 
     def __check_max_retry(self, max_retry: int) -> int:
         return self.__check_number_value(

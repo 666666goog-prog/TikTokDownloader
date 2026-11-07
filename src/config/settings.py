@@ -70,6 +70,14 @@ class Settings:
         "split": "-",
         "folder_mode": False,
         "music": False,
+        # 自定义下载规则（可在主菜单“下载规则设置”里用大白话修改）：
+        # album_threshold：图片作品的图片数达到该值时，单独建作品
+        # 文件夹并把背景音乐一起下载（1 表示单张图片也这样处理）
+        "album_threshold": 2,
+        # live_folder_music：实况作品是否单独建文件夹并下载背景音乐
+        "live_folder_music": True,
+        # video_root_mode：纯视频作品是否直接放根目录且不下载背景音乐
+        "video_root_mode": True,
         "truncate": 50,
         "storage_format": "",
         "cookie": "",

@@ -82,6 +82,12 @@ class Downloader:
         self.split: str = params.split
         self.folder_mode: bool = params.folder_mode
         self.music: bool = params.music
+        # 自定义下载规则（可在主菜单“下载规则设置”中修改）
+        self.album_threshold: int = getattr(params, "album_threshold", 2)
+        self.live_folder_music: bool = getattr(
+            params, "live_folder_music", True
+        )
+        self.video_root_mode: bool = getattr(params, "video_root_mode", True)
         self.dynamic_cover: bool = params.dynamic_cover
         self.static_cover: bool = params.static_cover
         # self.cookie = params.cookie
@@ -326,20 +332,29 @@ class Downloader:
             image_count = (
                 len(downloads) if isinstance(downloads, (list, tuple)) else 0
             )
-            # 图集作品（图片不少于 2 张）需要单独建文件夹并下载背景音乐
-            is_multi_gallery = is_gallery and image_count >= 2
+            # 以下载规则设置（主菜单“下载规则设置”）为准：
+            # 图集作品的图片数达到 album_threshold（默认 2 张）时，
+            # 单独建文件夹并下载背景音乐；门槛设为 1 时单张图片也算
+            is_multi_gallery = (
+                is_gallery and image_count >= self.album_threshold
+            )
             # 实况属于图文类作品，文件本身没有声音，它的声音就是
-            # 作品的背景音乐；因此实况不能按纯单视频处理（放根目录、
-            # 不下载音乐会得到无声文件），要和多图图集一样单独建
-            # 文件夹并把背景音乐一起下载，不受图片张数限制
-            needs_folder_music = is_multi_gallery or is_live
+            # 作品的背景音乐；开关开启时（默认）和多图图集一样单独
+            # 建文件夹并把背景音乐一起下载，开关关闭则按原版设置走
+            # 纯视频默认直接放根目录、不下载背景音乐；把该开关关掉
+            # 时，视频也单独建文件夹并下载背景音乐
+            needs_folder_music = (
+                is_multi_gallery
+                or (is_live and self.live_folder_music)
+                or (is_video and not self.video_root_mode)
+            )
             if is_gallery or is_video or is_live:
                 name = self.generate_work_name(item)
             else:
                 name = self.generate_detail_name(item)
             if needs_folder_music:
                 folder_mode = True
-            elif is_video:
+            elif is_video and self.video_root_mode:
                 # 纯单视频作品不建子文件夹，直接保存在根目录
                 folder_mode = False
             else:
@@ -385,17 +400,18 @@ class Downloader:
                 )
             else:
                 raise DownloaderError
-            if is_video:
+            if is_video and self.video_root_mode:
                 # 纯单视频作品不下载背景音乐
                 pass
             elif needs_folder_music:
-                # 图集/实况的背景音乐与作品文件保存在同一个作品
-                # 文件夹，文件名沿用统一规则，序号排在全部文件之后
+                # 图集/实况/视频（按设置）的背景音乐与作品文件保存在
+                # 同一个作品文件夹，文件名沿用统一规则，序号排在
+                # 全部文件之后（视频本体占序号 1，音乐为序号 2）
                 self.download_music(
                     **params,
                     type=_("音乐"),
                     switch=True,
-                    seq=image_count + 1,
+                    seq=(image_count if not is_video else 1) + 1,
                 )
             else:
                 self.download_music(
