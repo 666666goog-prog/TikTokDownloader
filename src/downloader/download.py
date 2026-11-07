@@ -406,7 +406,17 @@ class Downloader:
                 )
             else:
                 raise DownloaderError
-            if is_video and self.video_root_mode:
+            if await self.is_downloaded(item["id"]):
+                # 作品已有下载记录：图片/视频会整组跳过，背景音乐也
+                # 必须一起跳过。音乐原本只按“新路径下有没有同名文件”
+                # 判断，用户改过文件夹命名设置后再下载同一作品时，
+                # 旧音乐在新路径下找不到，就会被重复下载多份。
+                self.log.info(
+                    _("【{type}】{name} 已有下载记录，跳过背景音乐").format(
+                        type=_("音乐"), name=name
+                    )
+                )
+            elif is_video and self.video_root_mode:
                 # 纯单视频作品不下载背景音乐
                 pass
             elif needs_folder_music:
