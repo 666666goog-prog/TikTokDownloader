@@ -118,7 +118,7 @@ class TikTokDownloader:
                 _("{}作品下载记录").format(options[self.config["Record"]]),
                 self.__modify_record,
             ),
-            (_("删除作品下载记录"), self.delete_works_ids),
+            (_("删除作者下载记录"), self.delete_author_ids),
             (
                 _("{}运行日志记录").format(options[self.config["Logger"]]),
                 self.__modify_logging,
@@ -354,15 +354,48 @@ class TikTokDownloader:
         if n in range(len(self.__function_menu)):
             await self.__function_menu[n][1]()
 
-    async def delete_works_ids(self):
+    async def delete_author_ids(self):
+        """删除作者下载记录：从作者列表里选序号，一次清掉该作者的全部记录
+
+        只有新版下载的作品才有作者信息；旧版本下载的作品记录里
+        没有作者，看不到作者列表时，可用最后一项清空全部记录。
+        """
         if not self.config["Record"]:
             self.console.warning(
                 _("作品下载记录功能已禁用！"),
             )
             return
-        await self.recorder.delete_ids(self.console.input("请输入需要删除的作品 ID："))
+        authors = await self.recorder.list_authors()
+        if not authors:
+            self.console.warning(
+                "还没有带作者信息的下载记录（旧版本下载的作品没有存作者信息），"
+                "这类旧记录只能清空全部。",
+            )
+        options = [
+            f"{name or uid}（{count} 部作品）"
+            for uid, name, count in authors
+        ]
+        options.append("清空全部下载记录")
+        options.append("取消")
+        try:
+            choice = int(
+                choose("请选择要删除下载记录的作者", options, self.console)
+            )
+        except ValueError:
+            return
+        if choice == len(options):
+            return
+        if choice == len(options) - 1:
+            await self.recorder.delete_ids("ALL")
+            self.console.info("已清空全部下载记录！")
+            return
+        if choice not in range(1, len(options) - 1):
+            return
+        uid, name, _count = authors[choice - 1]
+        deleted = await self.recorder.delete_by_author(uid)
         self.console.info(
-            "删除作品下载记录成功！",
+            f"已删除作者 {name or uid} 的 {deleted} 部作品下载记录！"
+            "该作者的作品可以重新下载了。",
         )
 
     async def download_rules_setting(self):

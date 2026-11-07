@@ -36,8 +36,17 @@ class Database:
             );"""
         )
         await self.database.execute(
-            "CREATE TABLE IF NOT EXISTS download_data (ID TEXT PRIMARY KEY);"
+            "CREATE TABLE IF NOT EXISTS download_data (ID TEXT PRIMARY KEY, AUTHOR_UID TEXT, AUTHOR_NAME TEXT);"
         )
+        # 旧数据库只有 ID 一列：补上作者两列，老记录不受影响
+        # （已存在的列会报错，直接忽略即可）
+        for _column in ("AUTHOR_UID TEXT", "AUTHOR_NAME TEXT"):
+            try:
+                await self.database.execute(
+                    f"ALTER TABLE download_data ADD COLUMN {_column};"
+                )
+            except Exception:
+                pass
         await self.database.execute("""CREATE TABLE IF NOT EXISTS mapping_data (
         ID TEXT PRIMARY KEY,
         NAME TEXT NOT NULL,
@@ -103,11 +112,48 @@ class Database:
         await self.cursor.execute("SELECT ID FROM download_data WHERE ID=?", (id_,))
         return bool(await self.cursor.fetchone())
 
-    async def write_download_data(self, id_: str):
+    async def write_download_data(
+        self,
+        id_: str,
+        author_uid: str = None,
+        author_name: str = None,
+    ):
         await self.database.execute(
             "INSERT OR IGNORE INTO download_data (ID) VALUES (?);", (id_,)
         )
+        # 顺带记下作者：新版下载的作品才有作者信息，旧记录留空
+        if author_uid or author_name:
+            await self.database.execute(
+                "UPDATE download_data SET AUTHOR_UID=?, AUTHOR_NAME=? WHERE ID=?;",
+                (author_uid or "", author_name or "", id_),
+            )
         await self.database.commit()
+
+    async def list_download_authors(self) -> list:
+        """按作者汇总下载记录：每行是（作者 UID，昵称，作品数）
+
+        只有新版下载的作品才有作者信息，旧记录不参与汇总。
+        """
+        await self.cursor.execute(
+            "SELECT AUTHOR_UID, MAX(AUTHOR_NAME) AS AUTHOR_NAME, COUNT(*) AS CNT "
+            "FROM download_data WHERE AUTHOR_UID IS NOT NULL AND AUTHOR_UID != '' "
+            "GROUP BY AUTHOR_UID ORDER BY CNT DESC, AUTHOR_NAME;"
+        )
+        return await self.cursor.fetchall()
+
+    async def delete_download_data_by_author(self, author_uid: str) -> int:
+        """删掉某一个作者的全部下载记录，返回删掉的作品数"""
+        await self.cursor.execute(
+            "SELECT COUNT(*) AS CNT FROM download_data WHERE AUTHOR_UID=?;",
+            (author_uid,),
+        )
+        row = await self.cursor.fetchone()
+        deleted = row["CNT"] if row else 0
+        await self.database.execute(
+            "DELETE FROM download_data WHERE AUTHOR_UID=?;", (author_uid,)
+        )
+        await self.database.commit()
+        return deleted
 
     async def delete_download_data(self, ids: list | tuple | str):
         if not ids:

@@ -332,6 +332,17 @@ class Downloader:
             skipped_live=set(),
         )
         tasks = []
+        # 作品 ID →（作者 UID，作者昵称）：下载完成后写记录时顺带记下，
+        # 这样主菜单「删除作者下载记录」才能按作者汇总、按作者删除。
+        # 旧版本下载的作品记录里没有作者信息，不会出现在作者列表里。
+        work_authors = {
+            item["id"]: (
+                str(item.get("uid") or ""),
+                str(item.get("nickname") or ""),
+            )
+            for item in data
+            if item.get("id")
+        }
         for item in data:
             item["desc"] = beautify_string(
                 item["desc"],
@@ -463,10 +474,12 @@ class Downloader:
         await self.downloader_chart(
             tasks, count, self.general_progress_object(), **kwargs
         )
-        await self.__record_completed_works(tasks)
+        await self.__record_completed_works(tasks, work_authors)
         self.statistics_count(count)
 
-    async def __record_completed_works(self, tasks: list) -> None:
+    async def __record_completed_works(
+        self, tasks: list, work_authors: dict = None
+    ) -> None:
         """整批下载结束后统一处理下载记录
 
         一个作品的全部文件（封面、动图除外）都真实存在于目标
@@ -482,7 +495,10 @@ class Downloader:
             by_work.setdefault(t[4], []).append(t[2])
         for work_id, paths in by_work.items():
             if all(i.exists() for i in paths):
-                await self.recorder.update_id(work_id)
+                author_uid, author_name = (work_authors or {}).get(
+                    work_id, ("", "")
+                )
+                await self.recorder.update_id(work_id, author_uid, author_name)
             else:
                 await self.recorder.delete_id(work_id)
                 self.log.info(

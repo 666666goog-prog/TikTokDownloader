@@ -128,9 +128,22 @@ class DownloadRecorder:
             await self.database.has_download_data(id_) if self.switch and id_ else False
         )
 
-    async def update_id(self, id_: str):
+    async def update_id(
+        self,
+        id_: str,
+        author_uid: str = None,
+        author_name: str = None,
+    ):
         if self.switch and id_:
-            await self.database.write_download_data(id_)
+            await self.database.write_download_data(id_, author_uid, author_name)
+
+    async def list_authors(self) -> list:
+        return await self.database.list_download_authors()
+
+    async def delete_by_author(self, author_uid: str) -> int:
+        if self.switch and author_uid:
+            return await self.database.delete_download_data_by_author(author_uid)
+        return 0
 
     async def delete_id(self, id_: str) -> None:
         if self.switch and id_:
