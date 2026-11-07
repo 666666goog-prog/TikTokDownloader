@@ -94,7 +94,13 @@ class Downloader:
         self.folder_show_title: bool = getattr(
             params, "folder_show_title", False
         )
-        self.folder_show_id: bool = getattr(params, "folder_show_id", True)
+        self.folder_show_id: bool = getattr(params, "folder_show_id", False)
+        # 作品文件命名开关（与文件夹开关分开，默认不带作品 ID）
+        self.file_show_date: bool = getattr(params, "file_show_date", True)
+        self.file_show_type: bool = getattr(params, "file_show_type", True)
+        self.file_show_author: bool = getattr(params, "file_show_author", True)
+        self.file_show_title: bool = getattr(params, "file_show_title", True)
+        self.file_show_id: bool = getattr(params, "file_show_id", False)
         self.dynamic_cover: bool = params.dynamic_cover
         self.static_cover: bool = params.static_cover
         # self.cookie = params.cookie
@@ -498,7 +504,7 @@ class Downloader:
         长的文件名，在 Windows 上整体路径很容易超过系统上限而导致
         保存文件时报“系统找不到指定的路径”。因此文件夹名放哪些
         内容由四个开关决定（folder_show_date/type/title/id，主菜单
-        “下载规则设置”里可改），默认只放日期、类型和作品 ID；
+        “下载规则设置”里可改），默认只放日期和类型；
         四项全部关闭时兜底使用作品 ID，保证文件夹名不会为空。
         """
         parts = []
@@ -966,23 +972,32 @@ class Downloader:
         )
 
     def generate_work_name(self, data: dict) -> str:
-        """生成图集/实况/视频作品文件名称：发布日期-类型-作者-标题-作品ID
+        """生成图集/实况/视频作品文件名称：按开关拼装日期/类型/作者/标题/ID
 
-        序号由各下载方法在该名称后统一追加（图片按张序、视频为 1、
-        图集背景音乐排在全部图片之后），保证所有作品文件名都包含
-        发布日期、作品类型、作者、标题、作品 ID 与序号，不受
-        name_format 配置影响。
+        组成由五个开关决定（file_show_date/type/author/title/id，
+        主菜单“下载规则设置”问题五里可改），与文件夹名的开关分开；
+        默认日期、类型、作者、标题开，作品 ID 关（和原项目默认命名
+        一致，不带长串数字）。序号由各下载方法在该名称后统一追加
+        （图片按张序、视频为 1、图集背景音乐排在全部图片之后），
+        始终保留。五项全部关闭时兜底使用作品 ID，保证不为空名。
         """
-        parts = (
-            self.__work_publish_date(data),
-            str(data.get("type") or ""),
-            str(data.get("nickname") or data.get("uid") or ""),
-            str(data.get("desc") or ""),
-            str(data.get("id") or ""),
-        )
+        parts = []
+        if self.file_show_date:
+            parts.append(self.__work_publish_date(data))
+        if self.file_show_type:
+            parts.append(str(data.get("type") or ""))
+        if self.file_show_author:
+            parts.append(str(data.get("nickname") or data.get("uid") or ""))
+        if self.file_show_title:
+            parts.append(str(data.get("desc") or ""))
+        if self.file_show_id:
+            parts.append(str(data.get("id") or ""))
+        parts = [i for i in parts if i]
+        if not parts:
+            parts = [str(data.get("id") or "")]
         return beautify_string(
             self.cleaner.filter_name(
-                self.split.join(i for i in parts if i),
+                self.split.join(parts),
                 str(data.get("id") or ""),
             ),
             length=self.name_length,
