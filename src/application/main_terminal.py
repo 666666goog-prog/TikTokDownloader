@@ -2113,18 +2113,39 @@ class TikTok:
         self,
         tiktok=False,
     ):
-        if not (sec_user_id := await self.check_sec_user_id(self.owner.url)):
+        if sec_user_id := await self.check_sec_user_id(self.owner.url):
+            return sec_user_id
+        # 没填过自己的主页链接（或填的链接取不到账号）时，不再直接退出，
+        # 而是在这里让用户粘贴一次，校验通过后自动保存到配置文件，
+        # 以后进收藏下载就不用再填了。
+        self.console.print(
+            _(
+                "下载收藏需要你自己的抖音主页链接，现在还没设置好。\n"
+                "获取方法：打开抖音 App（用下载东西的那个号）→ 我 → 右上角分享 → 复制链接。"
+            ),
+        )
+        while True:
+            url = self.console.input(
+                _("请粘贴你自己的抖音主页链接（直接回车取消）："),
+            ).strip()
+            if not url or url.upper() == "Q":
+                self.logger.info(_("已取消下载收藏。"))
+                return ""
+            if sec_user_id := await self.check_sec_user_id(url):
+                self.__save_owner_url(url)
+                return sec_user_id
             self.logger.warning(
-                _("配置文件 owner_url 的 url 参数 {url} 无效").format(
-                    url=self.owner.url
-                ),
+                _("这个链接取不到账号信息，请确认是自己的抖音主页链接，再粘贴一次。"),
             )
-            # if self.console.input(
-            #         _("程序无法获取账号信息，建议修改配置文件后重新运行，是否返回上一级菜单(YES/NO)")
-            # ).upper != "NO":
-            #     return None
-            return ""
-        return sec_user_id
+
+    def __save_owner_url(self, url: str) -> None:
+        data = self.settings.read()
+        owner = dict(data.get("owner_url") or {})
+        owner["url"] = url
+        data["owner_url"] = owner
+        self.settings.update(data)
+        self.owner.url = url
+        self.logger.info(_("已把你的主页链接保存到配置文件，下次不用再填。"))
 
     @check_cookie_state(tiktok=False)
     async def collection_music_interactive(
