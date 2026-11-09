@@ -36,11 +36,11 @@ class Database:
             );"""
         )
         await self.database.execute(
-            "CREATE TABLE IF NOT EXISTS download_data (ID TEXT PRIMARY KEY, AUTHOR_UID TEXT, AUTHOR_NAME TEXT);"
+            "CREATE TABLE IF NOT EXISTS download_data (ID TEXT PRIMARY KEY, AUTHOR_UID TEXT, AUTHOR_NAME TEXT, SOURCE TEXT);"
         )
-        # 旧数据库只有 ID 一列：补上作者两列，老记录不受影响
+        # 旧数据库缺少新列时自动补上，老记录不受影响
         # （已存在的列会报错，直接忽略即可）
-        for _column in ("AUTHOR_UID TEXT", "AUTHOR_NAME TEXT"):
+        for _column in ("AUTHOR_UID TEXT", "AUTHOR_NAME TEXT", "SOURCE TEXT"):
             try:
                 await self.database.execute(
                     f"ALTER TABLE download_data ADD COLUMN {_column};"
@@ -117,6 +117,7 @@ class Database:
         id_: str,
         author_uid: str = None,
         author_name: str = None,
+        source: str = None,
     ):
         await self.database.execute(
             "INSERT OR IGNORE INTO download_data (ID) VALUES (?);", (id_,)
@@ -127,30 +128,51 @@ class Database:
                 "UPDATE download_data SET AUTHOR_UID=?, AUTHOR_NAME=? WHERE ID=?;",
                 (author_uid or "", author_name or "", id_),
             )
+        # 顺带记下这部作品是从哪个功能下载的（如“账号作品”“收藏作品”），
+        # 删除作者记录时据此分开处理，不同来源互不牵连
+        if source:
+            await self.database.execute(
+                "UPDATE download_data SET SOURCE=? WHERE ID=?;",
+                (source, id_),
+            )
         await self.database.commit()
 
     async def list_download_authors(self) -> list:
-        """按作者汇总下载记录：每行是（作者 UID，昵称，作品数）
+        """按“作者 + 来源”汇总下载记录
 
+        每行是（作者 UID，昵称，来源，作品数）。同一位作者如果既在
+        账号作品里下过、又在收藏里下过，会分成两行，删除时各删各的。
         只有新版下载的作品才有作者信息，旧记录不参与汇总。
         """
         await self.cursor.execute(
-            "SELECT AUTHOR_UID, MAX(AUTHOR_NAME) AS AUTHOR_NAME, COUNT(*) AS CNT "
+            "SELECT AUTHOR_UID, MAX(AUTHOR_NAME) AS AUTHOR_NAME, "
+            "IFNULL(SOURCE, '') AS SOURCE, COUNT(*) AS CNT "
             "FROM download_data WHERE AUTHOR_UID IS NOT NULL AND AUTHOR_UID != '' "
-            "GROUP BY AUTHOR_UID ORDER BY CNT DESC, AUTHOR_NAME;"
+            "GROUP BY AUTHOR_UID, IFNULL(SOURCE, '') ORDER BY CNT DESC, AUTHOR_NAME;"
         )
         return await self.cursor.fetchall()
 
-    async def delete_download_data_by_author(self, author_uid: str) -> int:
-        """删掉某一个作者的全部下载记录，返回删掉的作品数"""
+    async def delete_download_data_by_author(
+        self, author_uid: str, source: str = None
+    ) -> int:
+        """删掉某一个作者的下载记录，返回删掉的作品数
+
+        source 为 None 时删该作者的全部记录；给了来源时只删那个
+        来源下的记录（如只删“账号作品”的，不动“收藏作品”的）。
+        """
+        if source is None:
+            where, args = "AUTHOR_UID=?", (author_uid,)
+        else:
+            where = "AUTHOR_UID=? AND IFNULL(SOURCE, '')=?"
+            args = (author_uid, source)
         await self.cursor.execute(
-            "SELECT COUNT(*) AS CNT FROM download_data WHERE AUTHOR_UID=?;",
-            (author_uid,),
+            f"SELECT COUNT(*) AS CNT FROM download_data WHERE {where};",
+            args,
         )
         row = await self.cursor.fetchone()
         deleted = row["CNT"] if row else 0
         await self.database.execute(
-            "DELETE FROM download_data WHERE AUTHOR_UID=?;", (author_uid,)
+            f"DELETE FROM download_data WHERE {where};", args
         )
         await self.database.commit()
         return deleted
