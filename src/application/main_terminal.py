@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable, Union
 from pydantic import ValidationError
 
 # from ..custom import failure_handling
-from ..custom import suspend
+from ..custom import EDITION, suspend
 from ..downloader import Downloader
 from ..extract import Extractor
 from ..interface import (
@@ -138,43 +138,45 @@ class TikTok:
             "mark" in parameter.name_format,
             "nickname" in parameter.name_format,
         )
-        self.__function = (
-            (
-                _("批量下载账号作品(抖音)"),
-                self.account_acquisition_interactive,
-            ),
-            (
-                _("批量下载链接作品(抖音)"),
-                self.detail_interactive,
-            ),
-            (
-                _("获取直播拉流地址(抖音)"),
-                self.live_interactive,
-            ),
-            # 原第 4 项「采集作品评论数据」已按用户要求从菜单删除
-            (
-                _("批量下载合集作品(抖音)"),
-                self.mix_interactive,
-            ),
-            # 原第 6 项「采集账号详细数据」已按用户要求从菜单删除
-            # 原第 7、8 项「采集搜索结果数据」「采集抖音热榜数据」
-            # 已按用户要求从菜单删除（他用不上）；对应的处理方法
-            # 保留在代码里但不再出现在菜单中
-            # (_("批量下载话题作品(抖音)"),),
-            (
-                _("批量下载收藏作品(抖音)"),
-                self.collection_interactive,
-            ),
-            (
-                _("批量下载收藏音乐(抖音)"),
-                self.collection_music_interactive,
-            ),
-            # (_("批量下载收藏短剧(抖音)"),),
-            (
-                _("批量下载收藏夹作品(抖音)"),
-                self.collects_interactive,
-            ),
-        )
+        # 程序分两个版本（src/custom/internal.py 的 EDITION 决定）：
+        # 主版只管账号/链接/直播/合集；收藏版只管收藏三样。两个版本
+        # 各用各的设置与下载记录，互不影响。另外四个“采集数据”的
+        # 功能（评论/账号详细/搜索/热榜）已按用户要求删除，不在任何
+        # 版本的菜单里（处理方法保留在代码中但不挂菜单）。
+        if EDITION == "favorite":
+            self.__function = (
+                (
+                    _("批量下载收藏作品(抖音)"),
+                    self.collection_interactive,
+                ),
+                (
+                    _("批量下载收藏夹作品(抖音)"),
+                    self.collects_interactive,
+                ),
+                (
+                    _("批量下载收藏音乐(抖音)"),
+                    self.collection_music_interactive,
+                ),
+            )
+        else:
+            self.__function = (
+                (
+                    _("批量下载账号作品(抖音)"),
+                    self.account_acquisition_interactive,
+                ),
+                (
+                    _("批量下载链接作品(抖音)"),
+                    self.detail_interactive,
+                ),
+                (
+                    _("获取直播拉流地址(抖音)"),
+                    self.live_interactive,
+                ),
+                (
+                    _("批量下载合集作品(抖音)"),
+                    self.mix_interactive,
+                ),
+            )
         self.__function_account = (
             (_("使用 accounts_urls 参数的账号链接(推荐)"), self.account_detail_batch),
             (_("手动输入待采集的账号链接"), self.account_detail_inquire),
