@@ -218,6 +218,7 @@ class API:
                 _("正在获取{text}数据").format(text=self.text),
                 total=None,
             )
+            page = 0
             while not self.finished and self.pages > 0:
                 progress.update(task_id)
                 await self.run_single(
@@ -233,6 +234,20 @@ class API:
                     **kwargs,
                 )
                 self.pages -= 1
+                page += 1
+                # 拉取要一页页顺序进行，数据量大时耗时较长；把已获取
+                # 条数和当前页数实时写进进度提示，避免长时间看不出
+                # 程序是在干活还是卡住了
+                progress.update(
+                    task_id,
+                    description=_(
+                        "正在获取{text}数据（已获取 {count} 条，第 {page} 页）"
+                    ).format(
+                        text=self.text,
+                        count=len(self.response),
+                        page=page,
+                    ),
+                )
                 if callback:
                     await callback()
 
