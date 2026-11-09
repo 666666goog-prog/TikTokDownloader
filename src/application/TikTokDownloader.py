@@ -9,7 +9,8 @@ from src.config import Parameter, Settings
 from src.custom import (
     COOKIE_UPDATE_INTERVAL,
     DISCLAIMER_TEXT,
-    DOCUMENTATION_URL,
+        DOCUMENTATION_URL,
+    EDITION,
     LICENCE,
     MASTER,
     PROJECT_NAME,
@@ -113,7 +114,7 @@ class TikTokDownloader:
             # (_("从浏览器读取 Cookie (抖音)"), self.browser_cookie),
             # (_("扫码登录获取 Cookie (抖音)"), self.auto_cookie),
             (_("终端交互模式"), self.complete),
-            (_("Web UI 模式"), self.disable_function),
+                        (_("Web UI 模式"), self.web_ui_mode),
             # (_("Web API 模式"), self.__api_object),
             # (_("Web UI 模式"), self.__web_ui_object),
             (
@@ -133,7 +134,7 @@ class TikTokDownloader:
             ),
         )
 
-    async def disable_function(
+        async def disable_function(
         self,
         *args,
         **kwargs,
@@ -141,6 +142,20 @@ class TikTokDownloader:
         self.console.warning(
             "该功能正在重构，未来开发完成重新开放！",
         )
+
+    async def web_ui_mode(
+        self,
+        *args,
+        **kwargs,
+    ):
+        # Web UI 先在收藏版上线：网页里放收藏版的三个下载功能，
+        # 全程鼠标操作；主版暂时仍显示重构提示
+        if EDITION != "favorite":
+            await self.disable_function()
+            return
+        from .main_web import WebUIServer
+
+        await WebUIServer(self).serve()
 
     async def __modify_record(self):
         await self.change_config("Record")
