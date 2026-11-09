@@ -333,6 +333,9 @@ class Downloader:
         )
         tasks = []
         used_names = {}
+        # 文件夹名 → 作品 ID：本批已分配出去的作品文件夹，
+        # 供 __unique_folder_name 判断不同作品是否撞文件夹名
+        used_folders = {}
         # 本批被平台以 403 拒绝的作品（多半是仅朋友可见等权限限制）：
         # 最后写记录时单独提示，和普通“没下完”区分开
         self.forbidden_works = set()
@@ -400,9 +403,13 @@ class Downloader:
                 folder_mode,
                 # 只要这个作品要建独立文件夹，文件夹名就按命名开关
                 # 拼装（日期/类型/标题/ID），不直接套用完整文件名，
-                # 避免 Windows 路径过长导致保存失败
+                # 避免 Windows 路径过长导致保存失败；不同作品拼出
+                # 同一个文件夹名时自动加标题/作品 ID 区分，保证每个
+                # 作品有自己的文件夹
                 folder_name=(
-                    self.generate_folder_name(item) if folder_mode else None
+                    self.__unique_folder_name(item, name, root, used_folders)
+                    if folder_mode
+                    else None
                 ),
                 # 先不创建文件夹：等这个作品确实有文件要下载时再建，
                 # 避免作品全部跳过（比如已有下载记录）时留下空文件夹
@@ -591,13 +598,64 @@ class Downloader:
         parts = [i for i in parts if i]
         if not parts:
             parts = [str(data.get("id") or "")]
+        return self.__clean_folder_name(self.split.join(parts), data)
+
+    def __clean_folder_name(self, raw: str, data: dict) -> str:
+        """文件夹名统一清洗：过滤非法字符并按命名长度上限截断"""
         return beautify_string(
             self.cleaner.filter_name(
-                self.split.join(parts),
+                raw,
                 str(data.get("id") or ""),
             ),
             length=self.name_length,
         )
+
+    def __unique_folder_name(
+        self,
+        data: dict,
+        name: str,
+        root: Path,
+        used_folders: dict,
+    ) -> str:
+        """保证每个作品有自己的文件夹，不同作品不共用一个文件夹
+
+        文件夹名默认只有日期和类型，同一作者同一天的两个同类作品
+        （如两条实况）会拼出同一个文件夹名，被塞进同一个文件夹。
+        先到先得保留原名；撞名的后续作品先在文件夹名后加标题区
+        分，标题也一样（或都是无标题）时再加作品 ID。除了本批已
+        分配的文件夹，还要看磁盘上已有的同名文件夹：里面已经有
+        别的作品的文件时同样视为撞名，避免分不同批次下载时再次
+        合并；本作品自己的文件（补下载、已下载过）都以本作品的
+        文件名开头，不会误判。
+        """
+        base = self.generate_folder_name(data)
+
+        def taken(candidate: str) -> bool:
+            owner = used_folders.get(candidate)
+            if owner is not None:
+                return owner != data["id"]
+            folder = root.joinpath(candidate)
+            if folder.is_dir():
+                return any(
+                    entry.is_file() and not entry.name.startswith(name)
+                    for entry in folder.iterdir()
+                )
+            return False
+
+        folder_name = base
+        if taken(folder_name):
+            candidate = self.__clean_folder_name(
+                f"{base}{self.split}{self.__display_title(data)}",
+                data,
+            )
+            if candidate == base or taken(candidate):
+                candidate = self.__clean_folder_name(
+                    f"{base}{self.split}{data['id']}",
+                    data,
+                )
+            folder_name = candidate
+        used_folders[folder_name] = data["id"]
+        return folder_name
 
     async def is_downloaded(self, id_: str) -> bool:
         return await self.recorder.has_id(id_)
