@@ -12,6 +12,7 @@ from .internal import (
     VERSION_MAJOR,
     VERSION_MINOR,
     VERSION_BETA,
+    EDITION,
     RELEASES,
     REPOSITORY,
     LICENCE,

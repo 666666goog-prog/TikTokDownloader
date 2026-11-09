@@ -11,10 +11,14 @@ VOLUME.mkdir(exist_ok=True)
 VERSION_MAJOR = 5
 VERSION_MINOR = 8
 VERSION_BETA = False
+# 程序版本构成：“main”主版（账号/链接/直播/合集）；
+# “favorite”收藏版（收藏作品/收藏夹/收藏音乐）。构建收藏版时只改这一行
+EDITION = "main"
 __VERSION__ = f"{VERSION_MAJOR}.{VERSION_MINOR}.{'beta' if VERSION_BETA else 'stable'}"
-PROJECT_NAME = f"DouK-Downloader V{VERSION_MAJOR}.{VERSION_MINOR} {
-    'Beta' if VERSION_BETA else 'Stable'
-}"
+PROJECT_NAME = (
+    f"DouK-Downloader{' 收藏版' if EDITION == 'favorite' else ''} "
+    f"V{VERSION_MAJOR}.{VERSION_MINOR} {'Beta' if VERSION_BETA else 'Stable'}"
+)
 
 REPOSITORY = "https://github.com/JoeanAmier/TikTokDownloader"
 LICENCE = "GNU General Public License v3.0"
