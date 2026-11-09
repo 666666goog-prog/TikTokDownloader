@@ -9,7 +9,7 @@ from src.config import Parameter, Settings
 from src.custom import (
     COOKIE_UPDATE_INTERVAL,
     DISCLAIMER_TEXT,
-        DOCUMENTATION_URL,
+    DOCUMENTATION_URL,
     EDITION,
     LICENCE,
     MASTER,
@@ -114,7 +114,7 @@ class TikTokDownloader:
             # (_("从浏览器读取 Cookie (抖音)"), self.browser_cookie),
             # (_("扫码登录获取 Cookie (抖音)"), self.auto_cookie),
             (_("终端交互模式"), self.complete),
-                        (_("Web UI 模式"), self.web_ui_mode),
+            (_("Web UI 模式"), self.web_ui_mode),
             # (_("Web API 模式"), self.__api_object),
             # (_("Web UI 模式"), self.__web_ui_object),
             (
@@ -134,7 +134,7 @@ class TikTokDownloader:
             ),
         )
 
-        async def disable_function(
+    async def disable_function(
         self,
         *args,
         **kwargs,

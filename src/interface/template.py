@@ -238,7 +238,7 @@ class API:
                 # 拉取要一页页顺序进行，数据量大时耗时较长；把已获取
                 # 条数和当前页数实时写进进度提示，避免长时间看不出
                 # 程序是在干活还是卡住了
-                                progress.update(
+                progress.update(
                     task_id,
                     description=_(
                         "正在获取{text}数据（已获取 {count} 条，第 {page} 页）"
@@ -491,7 +491,7 @@ class API:
         cls,
         server_mode: bool = False,
     ) -> None:
-                if server_mode:
+        if server_mode:
             cls._progress_factory = cls.__fake_progress_object
         else:
             cls._progress_factory = cls.__general_progress_object
