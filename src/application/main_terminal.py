@@ -2078,6 +2078,18 @@ class TikTok:
         else:
             self.logger.info(_("已退出批量下载收藏夹作品(抖音)模式"))
 
+    async def web_list_collects(self) -> list[dict]:
+        """Web UI 专用：拉取收藏夹列表，返回 [{"name": 名称, "id": ID}]，
+        不做任何终端交互；拉取失败或没有收藏夹时返回空列表。"""
+        collects = await Collects(
+            self.parameter,
+            None,
+            None,
+        ).run()
+        if not any(collects):
+            return []
+        return self.extractor.extract_collects_info(collects)
+
     async def __get_collects_list(
         self,
         cookie: str = None,
