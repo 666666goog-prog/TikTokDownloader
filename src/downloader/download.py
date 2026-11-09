@@ -101,6 +101,9 @@ class Downloader:
         self.file_show_author: bool = getattr(params, "file_show_author", True)
         self.file_show_title: bool = getattr(params, "file_show_title", True)
         self.file_show_id: bool = getattr(params, "file_show_id", False)
+        # 当前这批作品是从哪个功能下载的（如“账号作品”“收藏作品”），
+        # 写下载记录时一并记下；由调用方在开下载前设置，默认空
+        self.record_source: str = ""
         self.dynamic_cover: bool = params.dynamic_cover
         self.static_cover: bool = params.static_cover
         # self.cookie = params.cookie
@@ -236,6 +239,8 @@ class Downloader:
         tiktok: bool,
         **kwargs,
     ) -> None:
+        # 链接作品（粘贴链接下载）统一走这里，记录来源记为“链接作品”
+        self.record_source = _("链接作品")
         root = self.storage_folder(mode="detail")
         await self.batch_processing(
             data,
@@ -516,7 +521,12 @@ class Downloader:
                 author_uid, author_name = (work_authors or {}).get(
                     work_id, ("", "")
                 )
-                await self.recorder.update_id(work_id, author_uid, author_name)
+                await self.recorder.update_id(
+                    work_id,
+                    author_uid,
+                    author_name,
+                    getattr(self, "record_source", "") or None,
+                )
             else:
                 await self.recorder.delete_id(work_id)
                 if work_id in getattr(self, "forbidden_works", set()):
