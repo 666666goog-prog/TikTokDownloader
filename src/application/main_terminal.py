@@ -159,14 +159,11 @@ class TikTok:
                 ),
             )
         else:
+            # 主版菜单（链接作品已按用户要求删除，嫌鸡肋）
             self.__function = (
                 (
                     _("批量下载账号作品(抖音)"),
                     self.account_acquisition_interactive,
-                ),
-                (
-                    _("批量下载链接作品(抖音)"),
-                    self.detail_interactive,
                 ),
                 (
                     _("获取直播拉流地址(抖音)"),
