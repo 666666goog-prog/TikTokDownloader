@@ -832,6 +832,15 @@ class TikTok:
         collect_id: str = "",
         collect_name: str = "",
     ):
+        # 记下这批作品的下载来源，写下载记录时一并存下，
+        # 之后“删除作者下载记录”就能按来源分开处理、互不牵连
+        self.downloader.record_source = {
+            "post": _("账号作品"),
+            "favorite": _("账号作品"),
+            "collection": _("收藏作品"),
+            "mix": _("合集作品"),
+            "collects": _("收藏夹"),
+        }.get(mode, "")
         await self.downloader.run(
             data,
             type_,

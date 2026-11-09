@@ -357,8 +357,12 @@ class TikTokDownloader:
             await self.__function_menu[n][1]()
 
     async def delete_author_ids(self):
-        """删除作者下载记录：从作者列表里选序号，一次清掉该作者的全部记录
+        """删除作者下载记录
 
+        先输作者名字里的几个字筛选（回车 = 全部），再从名单里选序号，
+        只清掉该作者在那一个来源（账号作品/收藏作品/…）下的记录，
+        其他来源的记录不动。名单按来源排序：账号作品的作者排最前，
+        收藏等其他来源的作者排在后面，不会混作一团。
         只有新版下载的作品才有作者信息；旧版本下载的作品记录里
         没有作者，看不到作者列表时，可用最后一项清空全部记录。
         """
@@ -367,15 +371,41 @@ class TikTokDownloader:
                 _("作品下载记录功能已禁用！"),
             )
             return
-        authors = await self.recorder.list_authors()
+        raw_authors = await self.recorder.list_authors()
+        authors = [
+            (r[0], r[1], r[2], r[3]) for r in raw_authors
+        ]  # （作者 UID，昵称，来源，作品数）
         if not authors:
             self.console.warning(
                 "还没有带作者信息的下载记录（旧版本下载的作品没有存作者信息），"
                 "这类旧记录只能清空全部。",
             )
+        else:
+            keyword = self.console.input(
+                "先输入作者名字里的几个字来筛选（直接按回车 = 显示全部作者）：\n"
+            ).strip()
+            if keyword:
+                authors = [
+                    a for a in authors if keyword in (a[1] or "")
+                ]
+                if not authors:
+                    self.console.info(
+                        f"没有找到名字里带“{keyword}”的作者，换个关键字试试。"
+                    )
+                    return
+            source_order = ["账号作品", "收藏作品", "收藏夹", "合集作品", "链接作品", ""]
+            authors.sort(
+                key=lambda a: (
+                    source_order.index(a[2])
+                    if a[2] in source_order
+                    else len(source_order),
+                    -a[3],
+                    a[1] or "",
+                )
+            )
         options = [
-            f"{name or uid}（{count} 部作品）"
-            for uid, name, count in authors
+            f"{name or uid}（{source or '早期记录'}，{count} 部作品）"
+            for uid, name, source, count in authors
         ]
         options.append("清空全部下载记录")
         options.append("取消")
@@ -393,11 +423,12 @@ class TikTokDownloader:
             return
         if choice not in range(1, len(options) - 1):
             return
-        uid, name, _count = authors[choice - 1]
-        deleted = await self.recorder.delete_by_author(uid)
+        uid, name, source, _count = authors[choice - 1]
+        deleted = await self.recorder.delete_by_author(uid, source)
+        label = source or "早期记录"
         self.console.info(
-            f"已删除作者 {name or uid} 的 {deleted} 部作品下载记录！"
-            "该作者的作品可以重新下载了。",
+            f"已删除作者 {name or uid} 在「{label}」里的 {deleted} 部作品下载记录！"
+            "这类作品可以重新下载了。",
         )
 
     async def download_rules_setting(self):
