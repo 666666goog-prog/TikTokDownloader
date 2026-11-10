@@ -684,6 +684,11 @@ class TikTokDownloader:
             False,
         )
         if await self.disclaimer():
+            if EDITION == "favorite":
+                # 收藏版：双击打开直接进图形界面，不再先过终端菜单；
+                # 关闭窗口即退出程序，全程鼠标操作
+                await self.gui_mode()
+                return
             await self.main_menu(safe_pop(self.run_command))
 
     def periodic_update_params(self):
