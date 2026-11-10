@@ -139,19 +139,16 @@ class TikTok:
             "nickname" in parameter.name_format,
         )
         # 程序分两个版本（src/custom/internal.py 的 EDITION 决定）：
-        # 主版只管账号/链接/直播/合集；收藏版只管收藏三样。两个版本
-        # 各用各的设置与下载记录，互不影响。另外四个“采集数据”的
-        # 功能（评论/账号详细/搜索/热榜）已按用户要求删除，不在任何
-        # 版本的菜单里（处理方法保留在代码中但不挂菜单）。
+        # 主版只管账号/直播/合集；收藏版只管收藏作品与收藏音乐
+        # （收藏夹功能已按用户要求删除）。两个版本各用各的设置与
+        # 下载记录，互不影响。另外四个“采集数据”的功能（评论/
+        # 账号详细/搜索/热榜）已按用户要求删除，不在任何版本的
+        # 菜单里（处理方法保留在代码中但不挂菜单）。
         if EDITION == "favorite":
             self.__function = (
                 (
                     _("批量下载收藏作品(抖音)"),
                     self.collection_interactive,
-                ),
-                (
-                    _("批量下载收藏夹作品(抖音)"),
-                    self.collects_interactive,
                 ),
                 (
                     _("批量下载收藏音乐(抖音)"),
@@ -2077,18 +2074,6 @@ class TikTok:
             self._time_statistics(start)
         else:
             self.logger.info(_("已退出批量下载收藏夹作品(抖音)模式"))
-
-    async def web_list_collects(self) -> list[dict]:
-        """Web UI 专用：拉取收藏夹列表，返回 [{"name": 名称, "id": ID}]，
-        不做任何终端交互；拉取失败或没有收藏夹时返回空列表。"""
-        collects = await Collects(
-            self.parameter,
-            None,
-            None,
-        ).run()
-        if not any(collects):
-            return []
-        return self.extractor.extract_collects_info(collects)
 
     async def __get_collects_list(
         self,

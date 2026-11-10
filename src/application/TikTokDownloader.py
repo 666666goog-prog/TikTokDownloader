@@ -114,7 +114,7 @@ class TikTokDownloader:
             # (_("从浏览器读取 Cookie (抖音)"), self.browser_cookie),
             # (_("扫码登录获取 Cookie (抖音)"), self.auto_cookie),
             (_("终端交互模式"), self.complete),
-            (_("Web UI 模式"), self.web_ui_mode),
+            (_("图形界面模式"), self.gui_mode),
             # (_("Web API 模式"), self.__api_object),
             # (_("Web UI 模式"), self.__web_ui_object),
             (
@@ -143,19 +143,19 @@ class TikTokDownloader:
             "该功能正在重构，未来开发完成重新开放！",
         )
 
-    async def web_ui_mode(
+    async def gui_mode(
         self,
         *args,
         **kwargs,
     ):
-        # Web UI 先在收藏版上线：网页里放收藏版的三个下载功能，
-        # 全程鼠标操作；主版暂时仍显示重构提示
+        # 图形界面先在收藏版上线：程序自己的窗口，全程鼠标操作；
+        # 主版暂时仍显示重构提示
         if EDITION != "favorite":
             await self.disable_function()
             return
-        from .main_web import WebUIServer
+        from .main_gui import run_gui
 
-        await WebUIServer(self).serve()
+        await run_gui(self)
 
     async def __modify_record(self):
         await self.change_config("Record")
