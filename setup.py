@@ -4,6 +4,7 @@ build_exe_options = {
     "packages": [
         "rich",
         "uvicorn",
+        "tkinter",
     ],
     "include_files": [
         ("locale", "locale"),
