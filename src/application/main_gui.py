@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """图形界面模式（收藏版）：程序自己的窗口，全程鼠标操作。
 
-在主菜单选择「图形界面模式」后，本模块打开一个独立的桌面窗口
-（不借助浏览器），窗口里的按钮调用与终端模式完全相同的下载
-引擎（TikTok 类），下载规则、下载记录共用同一套配置与数据库。
+收藏版双击打开后直接进入本窗口（不再先过终端菜单，背后的
+命令行窗口会被藏起来），窗口里的按钮调用与终端模式完全相同
+的下载引擎（TikTok 类），下载规则、下载记录共用同一套配置
+与数据库。关闭窗口即退出程序。
 
 窗口事件与程序的主事件循环协同运行（定时处理窗口事件），因此
-日志、拉取进度都能实时刷新；关闭窗口即回到主菜单。
+日志、拉取进度都能实时刷新。
 """
 
 import asyncio
@@ -74,16 +75,27 @@ class _LogProxy:
         except Exception:
             pass
 
+    @staticmethod
+    def _visible(args, kwargs) -> bool:
+        """引擎日志的 output 参数：False 表示只写日志文件、不给用户看
+        （网址、请求头这类调试内容都是这么标记的），窗口里同样不显示。"""
+        if args:
+            return bool(args[0])
+        return bool(kwargs.get("output", True))
+
     def info(self, text, *args, **kwargs):
-        self._push(text)
+        if self._visible(args, kwargs):
+            self._push(text)
         return self._wrapped.info(text, *args, **kwargs)
 
     def warning(self, text, *args, **kwargs):
-        self._push(text)
+        if self._visible(args, kwargs):
+            self._push(text)
         return self._wrapped.warning(text, *args, **kwargs)
 
     def error(self, text, *args, **kwargs):
-        self._push(text)
+        if self._visible(args, kwargs):
+            self._push(text)
         return self._wrapped.error(text, *args, **kwargs)
 
     def print(self, text, *args, **kwargs):
@@ -266,10 +278,36 @@ class GuiCore:
     # ---------- 下载记录 ----------
 
     async def list_authors(self, keyword: str = "") -> list[dict]:
-        rows = await self.app.recorder.list_authors()
+        """作者名单统一整理成字典列表。
+
+        数据库返回的是（UID，昵称，来源，作品数）元组行，不是字典；
+        来源为空字符串的是早期记录，显示为“早期记录”，但删除时
+        必须传回原始的空字符串，所以 raw 与 label 分开保存。
+        """
+        raw_rows = await self.app.recorder.list_authors()
+        rows = []
+        for r in raw_rows:
+            if isinstance(r, dict):
+                uid = r.get("uid")
+                name = r.get("name")
+                source = r.get("source") or ""
+                count = r.get("count") or 0
+            else:
+                uid, name, source, count = r[0], r[1], r[2] or "", r[3]
+            rows.append(
+                {
+                    "uid": str(uid or ""),
+                    "name": str(name or ""),
+                    "source": str(source),
+                    "source_label": str(source) or _("早期记录"),
+                    "count": int(count or 0),
+                }
+            )
         if keyword:
-            rows = [r for r in rows if keyword in (r.get("name") or "")]
-        rows.sort(key=lambda r: (SOURCE_ORDER.get(r.get("source"), 9), -r["count"]))
+            rows = [r for r in rows if keyword in r["name"]]
+        rows.sort(
+            key=lambda r: (SOURCE_ORDER.get(r["source_label"], 9), -r["count"])
+        )
         return rows
 
     async def delete_author(self, uid: str, source: str) -> int:
@@ -334,6 +372,22 @@ def _system_prefers_dark() -> bool:
             return value == 0
     except Exception:
         return False
+
+
+def _set_console_visible(visible: bool) -> None:
+    """Windows 下隐藏/恢复程序背后的命令行黑窗口（收藏版双击打开
+    直接进窗口，黑窗口没必要露在后面）。非 Windows 或失败时什么
+    都不做，不影响窗口本身。"""
+    try:
+        import ctypes
+
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 5 if visible else 0)
+    except Exception:
+        pass
+
+
 # ---------- 窗口层（tkinter 在此惰性导入，导入本模块不需要显示器） ----------
 
 _PALETTES = {
@@ -404,12 +458,31 @@ async def run_gui(app) -> None:
     console = app.console
     console.print()
     console.print(_("图形界面已打开，在弹出的程序窗口里用鼠标操作即可。"))
-    console.print(_("关闭那个窗口，就会回到这个主菜单。"))
+    console.print(_("关闭那个窗口，程序就会退出。"))
+
+    def spawn(coro, on_error) -> None:
+        """启动一个界面协程：出错时把原因写到对应的提示栏，
+        不让它变成控制台里一条没人看的“未处理的异常”。"""
+
+        async def _guarded():
+            try:
+                await coro
+            except Exception as error:  # noqa: BLE001 - 提示给用户看
+                on_error(error)
+
+        asyncio.ensure_future(_guarded())
 
     pref = core.get_theme_pref()
     dark = pref == "dark" or (pref == "" and _system_prefers_dark())
 
-    root = tk.Tk()
+    # 窗口才是正主：把背后的命令行黑窗口藏起来（建窗失败时恢复，
+    # 让报错能显示出来）
+    _set_console_visible(False)
+    try:
+        root = tk.Tk()
+    except Exception:
+        _set_console_visible(True)
+        raise
     root.title(_("DouK-Downloader 收藏版 · 图形界面"))
     root.geometry("900x740")
     root.minsize(780, 620)
@@ -617,9 +690,10 @@ async def run_gui(app) -> None:
             ok, error = await core.save_rules(values)
             rules_feedback.set(_("已保存，马上生效") if ok else error)
 
-        asyncio.ensure_future(_save())
+        spawn(_save(), lambda e: rules_feedback.set(_("保存失败：{error}").format(error=e)))
 
     ttk.Button(rules_row, text=_("保存规则"), command=save_rules).pack(side="right")
+
     # ---------- 页 3：下载记录 ----------
     page_records = ttk.Frame(notebook)
     notebook.add(page_records, text=_("下载记录"))
@@ -657,7 +731,7 @@ async def run_gui(app) -> None:
                 "",
                 "end",
                 iid=str(index),
-                values=(row.get("name") or "", row.get("source") or "", row.get("count") or 0),
+                values=(row.get("name") or "", row.get("source_label") or "", row.get("count") or 0),
             )
         records_feedback.set(_("共 {count} 条").format(count=len(rows)))
 
@@ -665,7 +739,7 @@ async def run_gui(app) -> None:
         async def _load():
             fill_authors(await core.list_authors(search_var.get().strip()))
 
-        asyncio.ensure_future(_load())
+        spawn(_load(), lambda e: records_feedback.set(_("读取记录失败：{error}").format(error=e)))
 
     ttk.Button(search_row, text=_("查找"), command=refresh_authors).pack(side="left")
     ttk.Button(search_row, text=_("显示全部"), command=lambda: (search_var.set(""), refresh_authors())).pack(
@@ -683,7 +757,7 @@ async def run_gui(app) -> None:
             _(
                 "确定删除「{name}」（{source}）的 {count} 条下载记录吗？\n"
                 "删掉后，这些作品下次会被重新下载。"
-            ).format(name=row.get("name") or "", source=row.get("source") or "", count=row.get("count") or 0),
+            ).format(name=row.get("name") or "", source=row.get("source_label") or "", count=row.get("count") or 0),
             parent=root,
         ):
             return
@@ -692,7 +766,7 @@ async def run_gui(app) -> None:
             await core.delete_author(str(row.get("uid") or ""), str(row.get("source") or ""))
             fill_authors(await core.list_authors(search_var.get().strip()))
 
-        asyncio.ensure_future(_delete())
+        spawn(_delete(), lambda e: records_feedback.set(_("删除失败：{error}").format(error=e)))
 
     def clear_all() -> None:
         if not messagebox.askyesno(
@@ -706,7 +780,7 @@ async def run_gui(app) -> None:
             await core.clear_records()
             fill_authors(await core.list_authors(search_var.get().strip()))
 
-        asyncio.ensure_future(_clear())
+        spawn(_clear(), lambda e: records_feedback.set(_("清空失败：{error}").format(error=e)))
 
     btn_delete.configure(command=delete_selected)
     btn_clear.configure(command=clear_all)
@@ -745,7 +819,7 @@ async def run_gui(app) -> None:
             cookie_feedback.set(_("Cookie 已保存") if ok else error)
             refresh_status()
 
-        asyncio.ensure_future(_save())
+        spawn(_save(), lambda e: cookie_feedback.set(_("保存失败：{error}").format(error=e)))
 
     ttk.Button(cookie_row, text=_("保存 Cookie"), command=save_cookie).pack(side="right")
     ttk.Button(cookie_row, text=_("从剪贴板粘贴"), command=paste_cookie).pack(
@@ -778,7 +852,7 @@ async def run_gui(app) -> None:
             ok, error = await core.save_owner_url(owner_var.get())
             owner_feedback.set(_("主页链接已保存") if ok else error)
 
-        asyncio.ensure_future(_save())
+        spawn(_save(), lambda e: owner_feedback.set(_("保存失败：{error}").format(error=e)))
 
     ttk.Button(owner_row, text=_("保存主页链接"), command=save_owner).pack(side="right")
     ttk.Button(owner_row, text=_("从剪贴板粘贴"), command=paste_owner).pack(
@@ -856,6 +930,3 @@ async def run_gui(app) -> None:
         except Exception:
             pass
         console.print(_("图形界面已关闭。"))
-
-
-
