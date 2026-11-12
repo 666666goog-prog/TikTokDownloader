@@ -53,37 +53,7 @@ def _now() -> str:
     return strftime("%H:%M:%S", localtime())
 
 
-def _work_row(raw: dict) -> dict:
-    """把一条作品原始数据整理成列表里显示的一行。
 
-    类型的判断口径与下载引擎完全一致：有图片且图片带 video
-    字段的是实况，只有图片的是图集，其余是视频。
-    """
-    images = raw.get("images") or []
-    if images:
-        type_ = (
-            _("实况")
-            if any(isinstance(i, dict) and i.get("video") for i in images)
-            else _("图片")
-        )
-    else:
-        type_ = _("视频")
-    timestamp = raw.get("create_time") or 0
-    try:
-        date = strftime("%Y-%m-%d", localtime(int(timestamp)))
-    except (TypeError, ValueError, OSError):
-        date = ""
-    mix = ""
-    mix_info = raw.get("mix_info")
-    if isinstance(mix_info, dict):
-        mix = str(mix_info.get("mix_name") or "")
-    return {
-        "id": str(raw.get("aweme_id") or ""),
-        "date": date,
-        "desc": str(raw.get("desc") or "").replace("\n", " ").strip(),
-        "type": type_,
-        "mix": mix,
-    }
 
 
 class _LogProxy:
@@ -159,15 +129,6 @@ class GuiCore:
             "error": "",
         }
         self._job_task: asyncio.Task | None = None
-        # 主页作品：先拉列表再勾选下载的状态
-        self.account = {
-            "state": "idle",  # idle/loading/done/error
-            "message": "",
-            "rows": [],
-            "author": "",
-        }
-        self._account_raw: dict[str, dict] = {}
-        self._account_ctx: dict = {}
         # 扫码登录的状态
         self.login = {"state": "idle", "message": ""}
         self._login_window: browser_login.BrowserLogin | None = None
@@ -203,13 +164,10 @@ class GuiCore:
         API._web_progress_hook = None
 
     def _on_progress(self, text, count, page) -> None:
-        message = _(
-            "正在拉取{text}列表（已获取 {count} 条，第 {page} 页）…"
-        ).format(text=text, count=count, page=page)
         if self.job["running"]:
-            self.job["step"] = message
-        if self.account["state"] == "loading":
-            self.account["message"] = message
+            self.job["step"] = _(
+                "正在拉取{text}列表（已获取 {count} 条，第 {page} 页）…"
+            ).format(text=text, count=count, page=page)
 
     # ---------- 状态 ----------
 
@@ -257,36 +215,6 @@ class GuiCore:
             "music": _("批量下载收藏音乐"),
         }[kind]
         return self._begin_job(title, factory)
-
-    def start_account_job(self, selected_ids: list[str]) -> tuple[bool, str]:
-        """下载主页作品列表里勾选的那部分作品。"""
-        if self.job["running"]:
-            return False, _("已有任务正在进行，等它完成或先停止它")
-        if not self.app.parameter.cookie_state:
-            return False, _("Cookie 还没设置，先到「设置」页登录或粘贴 Cookie")
-        if self.account["state"] != "done":
-            return False, _("先点「获取作品」，把作品列表拉出来")
-        raw = [self._account_raw[i] for i in selected_ids if i in self._account_raw]
-        if not raw:
-            return False, _("先在列表里勾选要下载的作品")
-        ctx = self._account_ctx
-
-        async def factory():
-            result = await self.engine._batch_process_detail(
-                raw,
-                user_id=ctx.get("sec_user_id", ""),
-                mark="",
-                api=False,
-                earliest=ctx.get("earliest"),
-                latest=ctx.get("latest"),
-                tiktok=False,
-                mode="post",
-                info=ctx.get("info"),
-            )
-            if result is False:
-                raise RuntimeError(_("作品数据提取失败，看日志里的提示"))
-
-        return self._begin_job(_("下载主页作品"), factory)
 
     def _on_job_done(self, task: asyncio.Task) -> None:
         # 兜底：任务在真正开始运行前就被取消时，_run_job 内部的
@@ -340,103 +268,6 @@ class GuiCore:
         )
         state["logs"] = [f"[{t}] {s}" for t, s in self.logs]
         return state
-
-    # ---------- 主页作品（先拉列表，再勾选下载） ----------
-
-    async def fetch_account(self, url: str) -> None:
-        """把某个作者的全部作品拉成列表（只拉列表，不下载）。"""
-        if self.account["state"] == "loading":
-            return
-        if self.job["running"]:
-            self.account = {
-                "state": "error",
-                "message": _("有下载任务正在进行，等它完成再获取作品"),
-                "rows": [],
-                "author": "",
-            }
-            return
-        if not self.app.parameter.cookie_state:
-            self.account = {
-                "state": "error",
-                "message": _("Cookie 还没设置，先到「设置」页登录或粘贴 Cookie"),
-                "rows": [],
-                "author": "",
-            }
-            return
-        url = (url or "").strip()
-        if not url:
-            self.account = {
-                "state": "error",
-                "message": _("先粘贴作者的抖音主页链接"),
-                "rows": [],
-                "author": "",
-            }
-            return
-        self.account = {
-            "state": "loading",
-            "message": _("正在获取作品列表…"),
-            "rows": [],
-            "author": "",
-        }
-        try:
-            sec_user_id = await self.engine.check_sec_user_id(url)
-            if not sec_user_id:
-                raise RuntimeError(
-                    _("这个链接取不到账号信息，请确认是作者的抖音主页链接")
-                )
-            try:
-                info = await self.engine.get_user_info_data(
-                    sec_user_id=sec_user_id
-                )
-            except Exception:  # noqa: BLE001 - 账号信息拿不到不挡拉列表
-                info = None
-            data, earliest, latest = await self.engine._get_account_data(
-                sec_user_id=sec_user_id,
-                tab="post",
-            )
-            if not data:
-                raise RuntimeError(
-                    _(
-                        "没有获取到作品（账号可能没有公开作品，"
-                        "或 Cookie 已过期）"
-                    )
-                )
-            rows = []
-            self._account_raw = {}
-            for raw in data:
-                row = _work_row(raw)
-                if not row["id"]:
-                    continue
-                self._account_raw[row["id"]] = raw
-                rows.append(row)
-            self._account_ctx = {
-                "sec_user_id": sec_user_id,
-                "info": info,
-                "earliest": earliest,
-                "latest": latest,
-            }
-            author = ""
-            if isinstance(info, dict):
-                author = str(info.get("nickname") or "")
-            if not author and data:
-                first_author = data[0].get("author") or {}
-                if isinstance(first_author, dict):
-                    author = str(first_author.get("nickname") or "")
-            self.account = {
-                "state": "done",
-                "message": _("获取完成：共 {count} 个作品，勾选后点「开始下载」").format(
-                    count=len(rows)
-                ),
-                "rows": rows,
-                "author": author,
-            }
-        except Exception as error:  # noqa: BLE001 - 失败原因要显示在界面上
-            self.account = {
-                "state": "error",
-                "message": str(error),
-                "rows": [],
-                "author": "",
-            }
 
     # ---------- 下载规则 ----------
 
@@ -673,28 +504,32 @@ def _set_console_visible(visible: bool) -> None:
 
 _PALETTES = {
     "light": {
-        "bg": "#F5F5F5",
+        "bg": "#F5F6F8",
         "panel": "#FFFFFF",
+        "sidebar": "#EDF0F4",
         "fg": "#1F2329",
-        "sub": "#6B7280",
+        "sub": "#8A919C",
         "entry": "#FFFFFF",
-        "border": "#D9D9D9",
-        "accent": "#07C160",
-        "accent_active": "#06AD56",
+        "border": "#DFE3E8",
+        "accent": "#2F7CF6",
+        "accent_active": "#1F6AE0",
+        "accent_soft": "#E3EEFE",
+        "info_bg": "#EEF4FF",
         "danger": "#E54545",
-        "tab_selected": "#FFFFFF",
     },
     "dark": {
         "bg": "#191919",
         "panel": "#232323",
+        "sidebar": "#1E1E1E",
         "fg": "#EDEDED",
         "sub": "#9CA3AF",
         "entry": "#2C2C2C",
         "border": "#3A3A3A",
-        "accent": "#07C160",
-        "accent_active": "#06AD56",
+        "accent": "#2F7CF6",
+        "accent_active": "#4A8DFF",
+        "accent_soft": "#26364D",
+        "info_bg": "#22314A",
         "danger": "#F0524F",
-        "tab_selected": "#2C2C2C",
     },
 }
 
@@ -730,7 +565,7 @@ _RULE_GROUPS = (
 
 
 async def run_gui(app) -> None:
-    """打开图形界面窗口，直到用户关闭窗口才返回（回到主菜单）。"""
+    """打开图形界面窗口，直到用户关闭窗口才返回。"""
     import tkinter as tk
     from tkinter import messagebox, ttk
 
@@ -764,118 +599,240 @@ async def run_gui(app) -> None:
     except Exception:
         _set_console_visible(True)
         raise
-    root.title(_("DouK-Downloader 收藏版 · 图形界面"))
-    root.geometry("900x740")
-    root.minsize(780, 620)
+    root.title(_("DouK-Downloader 收藏版"))
+    root.geometry("980x720")
+    root.minsize(860, 600)
 
     style = ttk.Style(root)
-    raw_widgets: list = []  # 需要手工上色的非 ttk 控件（文本框等）
+    raw_widgets: list = []  # 需要手工上色的 tk 控件（文本框、侧栏等）
+    nav_buttons: dict[str, tk.Button] = {}
+    pages: dict[str, ttk.Frame] = {}
+    current_page = tk.StringVar(value="download")
+    login_dlg: dict = {}  # 登录弹窗的控件引用（没打开时为空）
+
+    def pal() -> dict:
+        return _PALETTES["dark" if dark else "light"]
 
     def apply_theme() -> None:
-        pal = _PALETTES["dark" if dark else "light"]
+        p = pal()
         try:
             style.theme_use("clam")
         except tk.TclError:
             pass
-        style.configure("TFrame", background=pal["bg"])
+        style.configure("TFrame", background=p["bg"])
+        style.configure("Panel.TFrame", background=p["panel"])
         style.configure(
-            "TLabel", background=pal["bg"], foreground=pal["fg"], font=("Microsoft YaHei UI", 10)
+            "TLabel",
+            background=p["bg"],
+            foreground=p["fg"],
+            font=("Microsoft YaHei UI", 10),
         )
         style.configure(
-            "Sub.TLabel", background=pal["bg"], foreground=pal["sub"], font=("Microsoft YaHei UI", 9)
+            "Panel.TLabel",
+            background=p["panel"],
+            foreground=p["fg"],
+            font=("Microsoft YaHei UI", 10),
+        )
+        style.configure(
+            "Sub.TLabel",
+            background=p["bg"],
+            foreground=p["sub"],
+            font=("Microsoft YaHei UI", 9),
         )
         style.configure(
             "Title.TLabel",
-            background=pal["bg"],
-            foreground=pal["fg"],
+            background=p["bg"],
+            foreground=p["fg"],
             font=("Microsoft YaHei UI", 13, "bold"),
         )
         style.configure(
             "TButton",
-            background=pal["panel"],
-            foreground=pal["fg"],
-            bordercolor=pal["border"],
+            background=p["panel"],
+            foreground=p["fg"],
+            bordercolor=p["border"],
             font=("Microsoft YaHei UI", 10),
-            padding=(12, 6),
+            padding=(14, 7),
         )
-        style.map("TButton", background=[("active", pal["entry"])])
+        style.map("TButton", background=[("active", p["bg"])])
         style.configure(
             "Accent.TButton",
-            background=pal["accent"],
+            background=p["accent"],
             foreground="#FFFFFF",
-            font=("Microsoft YaHei UI", 12, "bold"),
-            padding=(18, 12),
+            bordercolor=p["accent"],
+            font=("Microsoft YaHei UI", 11, "bold"),
+            padding=(18, 10),
         )
         style.map(
             "Accent.TButton",
-            background=[("active", pal["accent_active"]), ("disabled", pal["border"])],
+            background=[
+                ("active", p["accent_active"]),
+                ("disabled", p["border"]),
+            ],
         )
         style.configure(
-            "Danger.TButton", foreground=pal["danger"], font=("Microsoft YaHei UI", 10), padding=(12, 6)
+            "Danger.TButton",
+            foreground=p["danger"],
+            font=("Microsoft YaHei UI", 10),
+            padding=(14, 7),
         )
         style.configure(
             "TCheckbutton",
-            background=pal["bg"],
-            foreground=pal["fg"],
+            background=p["bg"],
+            foreground=p["fg"],
             font=("Microsoft YaHei UI", 10),
         )
-        style.configure(
-            "TLabelframe", background=pal["bg"], bordercolor=pal["border"]
-        )
+        style.configure("TLabelframe", background=p["bg"], bordercolor=p["border"])
         style.configure(
             "TLabelframe.Label",
-            background=pal["bg"],
-            foreground=pal["fg"],
+            background=p["bg"],
+            foreground=p["fg"],
             font=("Microsoft YaHei UI", 10, "bold"),
         )
-        style.configure("TNotebook", background=pal["bg"], borderwidth=0)
-        style.configure(
-            "TNotebook.Tab",
-            background=pal["panel"],
-            foreground=pal["fg"],
-            font=("Microsoft YaHei UI", 10),
-            padding=(16, 7),
-        )
-        style.map("TNotebook.Tab", background=[("selected", pal["tab_selected"])])
-        style.configure(
-            "TEntry", fieldbackground=pal["entry"], foreground=pal["fg"]
-        )
-        style.configure(
-            "TSpinbox", fieldbackground=pal["entry"], foreground=pal["fg"]
-        )
+        style.configure("TEntry", fieldbackground=p["entry"], foreground=p["fg"])
+        style.configure("TSpinbox", fieldbackground=p["entry"], foreground=p["fg"])
         style.configure(
             "Treeview",
-            background=pal["panel"],
-            fieldbackground=pal["panel"],
-            foreground=pal["fg"],
-            rowheight=26,
+            background=p["panel"],
+            fieldbackground=p["panel"],
+            foreground=p["fg"],
+            rowheight=28,
             font=("Microsoft YaHei UI", 10),
         )
         style.configure(
             "Treeview.Heading",
-            background=pal["bg"],
-            foreground=pal["fg"],
+            background=p["bg"],
+            foreground=p["fg"],
             font=("Microsoft YaHei UI", 10, "bold"),
         )
-        root.configure(background=pal["bg"])
+        root.configure(background=p["bg"])
+        sidebar.configure(background=p["sidebar"])
         for widget in raw_widgets:
             widget.configure(
-                background=pal["panel"],
-                foreground=pal["fg"],
-                insertbackground=pal["fg"],
-                selectbackground=pal["accent"],
+                background=p["panel"],
+                foreground=p["fg"],
+                insertbackground=p["fg"],
+                selectbackground=p["accent"],
+                highlightbackground=p["border"],
             )
+        paint_nav()
+        for widget in side_frames:
+            widget.configure(background=p["sidebar"])
+        for widget, is_sub in side_labels:
+            widget.configure(
+                background=p["sidebar"],
+                foreground=p["sub"] if is_sub else p["fg"],
+            )
+        btn_open_login.configure(
+            background=p["accent"],
+            foreground="#FFFFFF",
+            activebackground=p["accent_active"],
+        )
         theme_button.configure(text=_("☀️ 浅色") if dark else _("🌙 深色"))
+        if login_dlg:
+            paint_login_dialog()
 
-    # ---------- 顶部状态栏 ----------
-    header = ttk.Frame(root)
-    header.pack(fill="x", padx=14, pady=(12, 4))
-    ttk.Label(header, text=_("DouK-Downloader 收藏版"), style="Title.TLabel").pack(side="left")
-    theme_button = ttk.Button(header)
-    theme_button.pack(side="right")
+    def paint_nav(active: str | None = None) -> None:
+        p = pal()
+        active = active or current_page.get()
+        for name, button in nav_buttons.items():
+            if name == active:
+                button.configure(
+                    background=p["accent_soft"],
+                    foreground=p["accent"],
+                    font=("Microsoft YaHei UI", 11, "bold"),
+                )
+            else:
+                button.configure(
+                    background=p["sidebar"],
+                    foreground=p["fg"],
+                    font=("Microsoft YaHei UI", 11),
+                )
+
+    def show_page(name: str) -> None:
+        current_page.set(name)
+        for key, frame in pages.items():
+            if key == name:
+                frame.pack(fill="both", expand=True)
+            else:
+                frame.pack_forget()
+        paint_nav(name)
+
+    # ---------- 左侧导航栏 ----------
+    side_frames: list = []
+    side_labels: list = []
+    sidebar = tk.Frame(root, width=176)
+    side_frames.append(sidebar)
+    sidebar.pack(side="left", fill="y")
+    sidebar.pack_propagate(False)
+    side_title = tk.Label(
+        sidebar,
+        text=_("DouK-Downloader"),
+        font=("Microsoft YaHei UI", 12, "bold"),
+        anchor="w",
+    )
+    side_title.pack(fill="x", padx=16, pady=(18, 0))
+    side_labels.append((side_title, False))
+    side_sub = tk.Label(sidebar, text=_("收藏版"), anchor="w")
+    side_sub.pack(fill="x", padx=16, pady=(0, 14))
+    side_labels.append((side_sub, True))
+
+    for key, label in (
+        ("download", _("⬇  下载")),
+        ("rules", _("⚙  下载规则")),
+        ("records", _("🗂  下载记录")),
+        ("settings", _("🔧  设置")),
+    ):
+        button = tk.Button(
+            sidebar,
+            text=label,
+            anchor="w",
+            relief="flat",
+            bd=0,
+            padx=16,
+            pady=9,
+            cursor="hand2",
+            activebackground=pal()["accent_soft"],
+            command=lambda k=key: show_page(k),
+        )
+        button.pack(fill="x", padx=8, pady=2)
+        nav_buttons[key] = button
+
+    side_bottom = tk.Frame(sidebar)
+    side_frames.append(side_bottom)
+    side_bottom.pack(side="bottom", fill="x", padx=8, pady=12)
+    login_state_var = tk.StringVar(value=_("登录：未设置 Cookie"))
+    side_state = tk.Label(
+        side_bottom, textvariable=login_state_var, anchor="w", wraplength=150
+    )
+    side_state.pack(fill="x", padx=8, pady=(0, 6))
+    side_labels.append((side_state, True))
+    btn_open_login = tk.Button(
+        side_bottom,
+        text=_("登录抖音"),
+        relief="flat",
+        bd=0,
+        pady=8,
+        cursor="hand2",
+        font=("Microsoft YaHei UI", 10, "bold"),
+    )
+    btn_open_login.pack(fill="x")
+    theme_button = ttk.Button(side_bottom, text=_("🌙 深色"))
+    theme_button.pack(fill="x", pady=(8, 0))
+
+    def toggle_theme() -> None:
+        nonlocal dark
+        dark = not dark
+        core.set_theme_pref("dark" if dark else "light")
+        apply_theme()
+
+    theme_button.configure(command=toggle_theme)
+
+    # ---------- 右侧内容区 ----------
+    content = ttk.Frame(root)
+    content.pack(side="left", fill="both", expand=True)
     status_var = tk.StringVar()
-    ttk.Label(root, textvariable=status_var, style="Sub.TLabel").pack(
-        anchor="w", padx=16
+    ttk.Label(content, textvariable=status_var, style="Sub.TLabel").pack(
+        anchor="w", padx=18, pady=(12, 2)
     )
 
     def refresh_status() -> None:
@@ -886,47 +843,59 @@ async def run_gui(app) -> None:
                 root=info["root"],
             )
         )
+        login_state_var.set(
+            _("登录：已设置 Cookie")
+            if info["cookie_state"]
+            else _("登录：未设置 Cookie")
+        )
 
-    def toggle_theme() -> None:
-        nonlocal dark
-        dark = not dark
-        core.set_theme_pref("dark" if dark else "light")
-        apply_theme()
+    def make_page(key: str) -> ttk.Frame:
+        frame = ttk.Frame(content)
+        pages[key] = frame
+        return frame
 
-    theme_button.configure(command=toggle_theme)
-
-    notebook = ttk.Notebook(root)
-    notebook.pack(fill="both", expand=True, padx=12, pady=10)
 
     # ---------- 页 1：下载 ----------
-    page_job = ttk.Frame(notebook)
-    notebook.add(page_job, text=_("下载"))
-
+    page_job = make_page("download")
+    ttk.Label(page_job, text=_("下载我的收藏"), style="Title.TLabel").pack(
+        anchor="w", padx=18, pady=(10, 2)
+    )
+    ttk.Label(
+        page_job,
+        text=_("下载你自己收藏的作品和收藏的音乐，点一下就开始，不用别的操作。"),
+        style="Sub.TLabel",
+    ).pack(anchor="w", padx=18)
     buttons = ttk.Frame(page_job)
-    buttons.pack(fill="x", padx=10, pady=12)
+    buttons.pack(fill="x", padx=18, pady=14)
     btn_collection = ttk.Button(
         buttons, text=_("批量下载收藏作品"), style="Accent.TButton"
     )
     btn_collection.pack(side="left", expand=True, fill="x", padx=(0, 6))
     btn_music = ttk.Button(buttons, text=_("批量下载收藏音乐"), style="Accent.TButton")
     btn_music.pack(side="left", expand=True, fill="x", padx=(6, 0))
-
     step_var = tk.StringVar(value=_("点上面的按钮开始下载"))
-    ttk.Label(page_job, textvariable=step_var).pack(anchor="w", padx=12)
-    log_text = tk.Text(page_job, height=16, wrap="word", font=("Consolas", 9))
+    ttk.Label(page_job, textvariable=step_var).pack(anchor="w", padx=18)
+    log_text = tk.Text(
+        page_job,
+        height=16,
+        wrap="word",
+        font=("Consolas", 9),
+        relief="flat",
+        bd=0,
+        highlightthickness=1,
+    )
     raw_widgets.append(log_text)
-    log_text.pack(fill="both", expand=True, padx=10, pady=8)
+    log_text.pack(fill="both", expand=True, padx=18, pady=10)
     log_text.configure(state="disabled")
     job_row = ttk.Frame(page_job)
-    job_row.pack(fill="x", padx=10, pady=(0, 10))
+    job_row.pack(fill="x", padx=18, pady=(0, 12))
     btn_stop = ttk.Button(job_row, text=_("停止"), style="Danger.TButton")
     btn_stop.pack(side="right")
-    job_hint = ttk.Label(
+    ttk.Label(
         job_row,
         text=_("停止不会白下：下好的文件下次自动跳过"),
         style="Sub.TLabel",
-    )
-    job_hint.pack(side="left")
+    ).pack(side="left")
 
     def start(kind: str) -> None:
         ok, error = core.start_job(kind)
@@ -937,158 +906,15 @@ async def run_gui(app) -> None:
     btn_music.configure(command=lambda: start("music"))
     btn_stop.configure(command=core.stop_job)
 
-    # ---------- 页 2：主页作品（先拉列表，勾选后再下载） ----------
-    page_account = ttk.Frame(notebook)
-    notebook.add(page_account, text=_("主页作品"))
-    acct_row = ttk.Frame(page_account)
-    acct_row.pack(fill="x", padx=12, pady=10)
-    ttk.Label(acct_row, text=_("作者主页链接：")).pack(side="left")
-    account_url_var = tk.StringVar()
-    ttk.Entry(acct_row, textvariable=account_url_var).pack(
-        side="left", fill="x", expand=True, padx=6
+    # ---------- 页 2：下载规则 ----------
+    page_rules = make_page("rules")
+    ttk.Label(page_rules, text=_("下载规则"), style="Title.TLabel").pack(
+        anchor="w", padx=18, pady=(10, 6)
     )
-
-    def paste_account_url() -> None:
-        try:
-            account_url_var.set(root.clipboard_get())
-        except tk.TclError:
-            pass
-
-    ttk.Button(acct_row, text=_("从剪贴板粘贴"), command=paste_account_url).pack(
-        side="left"
-    )
-    btn_fetch = ttk.Button(acct_row, text=_("获取作品"))
-    btn_fetch.pack(side="left", padx=(6, 0))
-    account_feedback = tk.StringVar(
-        value=_("粘贴作者的抖音主页链接，点「获取作品」，作品会先列出来，勾选后再下载")
-    )
-    ttk.Label(page_account, textvariable=account_feedback, style="Sub.TLabel").pack(
-        anchor="w", padx=12
-    )
-    acct_tree = ttk.Treeview(
-        page_account,
-        columns=("check", "date", "desc", "mix", "type"),
-        show="headings",
-        height=14,
-    )
-    acct_tree.heading("check", text=_("选"))
-    acct_tree.heading("date", text=_("发布日期"))
-    acct_tree.heading("desc", text=_("描述"))
-    acct_tree.heading("mix", text=_("合集"))
-    acct_tree.heading("type", text=_("类型"))
-    acct_tree.column("check", width=40, anchor="center", stretch=False)
-    acct_tree.column("date", width=95, anchor="center", stretch=False)
-    acct_tree.column("desc", width=430)
-    acct_tree.column("mix", width=150)
-    acct_tree.column("type", width=60, anchor="center", stretch=False)
-    acct_tree.pack(fill="both", expand=True, padx=12, pady=6)
-    checked_ids: set[str] = set()
-
-    def fill_account_tree(rows: list[dict]) -> None:
-        acct_tree.delete(*acct_tree.get_children())
-        checked_ids.clear()
-        for row in rows:
-            checked_ids.add(row["id"])
-            acct_tree.insert(
-                "",
-                "end",
-                iid=row["id"],
-                values=("☑", row["date"], row["desc"], row["mix"], row["type"]),
-            )
-        update_account_button()
-
-    def update_account_button() -> None:
-        count = len(checked_ids)
-        btn_account_download.configure(
-            text=_("开始下载（{count}）").format(count=count)
-        )
-
-    def toggle_row(event) -> None:
-        row_id = acct_tree.identify_row(event.y)
-        if not row_id:
-            return
-        if row_id in checked_ids:
-            checked_ids.discard(row_id)
-            mark = "☐"
-        else:
-            checked_ids.add(row_id)
-            mark = "☑"
-        values = list(acct_tree.item(row_id, "values"))
-        values[0] = mark
-        acct_tree.item(row_id, values=values)
-        update_account_button()
-
-    acct_tree.bind("<ButtonRelease-1>", toggle_row)
-
-    acct_btn_row = ttk.Frame(page_account)
-    acct_btn_row.pack(fill="x", padx=12, pady=(0, 10))
-
-    def select_all() -> None:
-        for row_id in acct_tree.get_children():
-            checked_ids.add(row_id)
-            values = list(acct_tree.item(row_id, "values"))
-            values[0] = "☑"
-            acct_tree.item(row_id, values=values)
-        update_account_button()
-
-    def invert_selection() -> None:
-        for row_id in acct_tree.get_children():
-            if row_id in checked_ids:
-                checked_ids.discard(row_id)
-                mark = "☐"
-            else:
-                checked_ids.add(row_id)
-                mark = "☑"
-            values = list(acct_tree.item(row_id, "values"))
-            values[0] = mark
-            acct_tree.item(row_id, values=values)
-        update_account_button()
-
-    def clear_account_list() -> None:
-        acct_tree.delete(*acct_tree.get_children())
-        checked_ids.clear()
-        update_account_button()
-
-    ttk.Button(acct_btn_row, text=_("全选"), command=select_all).pack(side="left")
-    ttk.Button(acct_btn_row, text=_("反选"), command=invert_selection).pack(
-        side="left", padx=6
-    )
-    ttk.Button(acct_btn_row, text=_("清空列表"), command=clear_account_list).pack(
-        side="left"
-    )
-    btn_account_download = ttk.Button(
-        acct_btn_row, text=_("开始下载（0）"), style="Accent.TButton"
-    )
-    btn_account_download.pack(side="right")
-
-    def fetch_account() -> None:
-        async def _fetch():
-            await core.fetch_account(account_url_var.get())
-
-        spawn(
-            _fetch(),
-            lambda e: account_feedback.set(
-                _("获取失败：{error}").format(error=e)
-            ),
-        )
-
-    btn_fetch.configure(command=fetch_account)
-
-    def start_account_download() -> None:
-        selected = [r for r in acct_tree.get_children() if r in checked_ids]
-        ok, error = core.start_account_job(selected)
-        if not ok:
-            messagebox.showwarning(_("暂时不能开始"), error, parent=root)
-
-    btn_account_download.configure(command=start_account_download)
-
-    # ---------- 页 3：下载规则 ----------
-    page_rules = ttk.Frame(notebook)
-    notebook.add(page_rules, text=_("下载规则"))
     rules = core.get_rules()
     threshold_var = tk.IntVar(value=int(rules["album_threshold"]))
     row_top = ttk.Frame(page_rules)
-    row_top.pack(fill="x", padx=12, pady=10)
+    row_top.pack(fill="x", padx=18, pady=8)
     ttk.Label(row_top, text=_("图集有几张图片时，单独建一个文件夹（并下载背景音乐）：")).pack(side="left")
     ttk.Spinbox(
         row_top, from_=1, to=999, width=6, textvariable=threshold_var
@@ -1096,7 +922,7 @@ async def run_gui(app) -> None:
     rule_vars: dict[str, tk.BooleanVar] = {}
     for group_title, items in _RULE_GROUPS:
         frame = ttk.Labelframe(page_rules, text=_(group_title))
-        frame.pack(fill="x", padx=12, pady=6)
+        frame.pack(fill="x", padx=18, pady=6)
         for key, label in items:
             var = tk.BooleanVar(value=bool(rules[key]))
             rule_vars[key] = var
@@ -1105,7 +931,7 @@ async def run_gui(app) -> None:
             )
     rules_feedback = tk.StringVar()
     rules_row = ttk.Frame(page_rules)
-    rules_row.pack(fill="x", padx=12, pady=10)
+    rules_row.pack(fill="x", padx=18, pady=10)
     ttk.Label(rules_row, textvariable=rules_feedback, style="Sub.TLabel").pack(side="left")
 
     def save_rules() -> None:
@@ -1120,16 +946,18 @@ async def run_gui(app) -> None:
 
     ttk.Button(rules_row, text=_("保存规则"), command=save_rules).pack(side="right")
 
-    # ---------- 页 4：下载记录 ----------
-    page_records = ttk.Frame(notebook)
-    notebook.add(page_records, text=_("下载记录"))
+    # ---------- 页 3：下载记录 ----------
+    page_records = make_page("records")
+    ttk.Label(page_records, text=_("下载记录"), style="Title.TLabel").pack(
+        anchor="w", padx=18, pady=(10, 6)
+    )
     search_row = ttk.Frame(page_records)
-    search_row.pack(fill="x", padx=12, pady=10)
+    search_row.pack(fill="x", padx=18, pady=8)
     ttk.Label(search_row, text=_("按作者名查找：")).pack(side="left")
     search_var = tk.StringVar()
     ttk.Entry(search_row, textvariable=search_var, width=24).pack(side="left", padx=6)
     tree = ttk.Treeview(
-        page_records, columns=("name", "source", "count"), show="headings", height=12
+        page_records, columns=("name", "source", "count"), show="headings", height=13
     )
     tree.heading("name", text=_("作者"))
     tree.heading("source", text=_("下载来源"))
@@ -1137,11 +965,11 @@ async def run_gui(app) -> None:
     tree.column("name", width=340)
     tree.column("source", width=140, anchor="center")
     tree.column("count", width=90, anchor="center")
-    tree.pack(fill="both", expand=True, padx=12)
+    tree.pack(fill="both", expand=True, padx=18)
     author_rows: list[dict] = []
     records_feedback = tk.StringVar()
     rec_row = ttk.Frame(page_records)
-    rec_row.pack(fill="x", padx=12, pady=10)
+    rec_row.pack(fill="x", padx=18, pady=10)
     ttk.Label(rec_row, textvariable=records_feedback, style="Sub.TLabel").pack(side="left")
     btn_clear = ttk.Button(rec_row, text=_("清空全部记录"), style="Danger.TButton")
     btn_clear.pack(side="right", padx=(6, 0))
@@ -1211,96 +1039,29 @@ async def run_gui(app) -> None:
     btn_delete.configure(command=delete_selected)
     btn_clear.configure(command=clear_all)
 
-    # ---------- 页 5：设置 ----------
-    page_settings = ttk.Frame(notebook)
-    notebook.add(page_settings, text=_("设置"))
-    ttk.Label(page_settings, text=_("抖音登录"), style="Title.TLabel").pack(
-        anchor="w", padx=12, pady=(12, 2)
+    # ---------- 页 4：设置 ----------
+    page_settings = make_page("settings")
+    ttk.Label(page_settings, text=_("设置"), style="Title.TLabel").pack(
+        anchor="w", padx=18, pady=(10, 2)
     )
     ttk.Label(
         page_settings,
-        text=_(
-            "点下面的按钮会打开一个登录窗口，在里面扫码登录抖音，"
-            "登录好程序会自动读取并保存 Cookie，窗口自动关掉，全程不用复制粘贴。"
-        ),
+        text=_("登录在左下角的「登录抖音」按钮里：扫码登录或粘贴 Cookie 都在那个弹窗里。"),
         style="Sub.TLabel",
-    ).pack(anchor="w", padx=12)
-    login_row = ttk.Frame(page_settings)
-    login_row.pack(fill="x", padx=12, pady=6)
-    btn_login = ttk.Button(login_row, text=_("打开登录窗口（扫码登录）"))
-    btn_login.pack(side="left")
-    btn_login_cancel = ttk.Button(login_row, text=_("取消登录"))
-    btn_login_cancel.pack(side="left", padx=6)
-    login_feedback = tk.StringVar()
-    ttk.Label(login_row, textvariable=login_feedback, style="Sub.TLabel").pack(
-        side="left", padx=6
-    )
-
-    def start_login() -> None:
-        async def _login():
-            await core.start_browser_login()
-            refresh_status()
-
-        spawn(
-            _login(),
-            lambda e: login_feedback.set(_("登录失败：{error}").format(error=e)),
-        )
-
-    btn_login.configure(command=start_login)
-    btn_login_cancel.configure(command=core.cancel_browser_login)
-
-    ttk.Label(page_settings, text=_("Cookie（登录凭证）"), style="Title.TLabel").pack(
-        anchor="w", padx=12, pady=(12, 2)
-    )
-    ttk.Label(
-        page_settings,
-        text=_("不想扫码也可以用老办法：从浏览器复制 Cookie 后，点「从剪贴板粘贴」，再点「保存并校验」。"),
-        style="Sub.TLabel",
-    ).pack(anchor="w", padx=12)
-    cookie_text = tk.Text(page_settings, height=4, wrap="word", font=("Consolas", 9))
-    raw_widgets.append(cookie_text)
-    cookie_text.pack(fill="x", padx=12, pady=6)
-    cookie_feedback = tk.StringVar()
-    cookie_row = ttk.Frame(page_settings)
-    cookie_row.pack(fill="x", padx=12)
-    ttk.Label(cookie_row, textvariable=cookie_feedback, style="Sub.TLabel").pack(side="left")
-
-    def paste_cookie() -> None:
-        try:
-            text = root.clipboard_get()
-        except tk.TclError:
-            text = ""
-        cookie_text.delete("1.0", "end")
-        if text:
-            cookie_text.insert("1.0", text)
-
-    def save_cookie() -> None:
-        async def _save():
-            ok, message = await core.save_cookie(cookie_text.get("1.0", "end"))
-            cookie_feedback.set(message)
-            if ok:
-                refresh_status()
-
-        spawn(_save(), lambda e: cookie_feedback.set(_("保存失败：{error}").format(error=e)))
-
-    ttk.Button(cookie_row, text=_("保存并校验"), command=save_cookie).pack(side="right")
-    ttk.Button(cookie_row, text=_("从剪贴板粘贴"), command=paste_cookie).pack(
-        side="right", padx=6
-    )
-
+    ).pack(anchor="w", padx=18)
     ttk.Label(page_settings, text=_("我的抖音主页链接"), style="Title.TLabel").pack(
-        anchor="w", padx=12, pady=(16, 2)
+        anchor="w", padx=18, pady=(18, 2)
     )
     ttk.Label(
         page_settings,
         text=_("下载「收藏作品」要用：打开抖音网页版你的主页，复制地址栏链接粘贴到这里。"),
         style="Sub.TLabel",
-    ).pack(anchor="w", padx=12)
+    ).pack(anchor="w", padx=18)
     owner_var = tk.StringVar(value=core.status()["owner_url"])
-    ttk.Entry(page_settings, textvariable=owner_var).pack(fill="x", padx=12, pady=6)
+    ttk.Entry(page_settings, textvariable=owner_var).pack(fill="x", padx=18, pady=8)
     owner_feedback = tk.StringVar()
     owner_row = ttk.Frame(page_settings)
-    owner_row.pack(fill="x", padx=12)
+    owner_row.pack(fill="x", padx=18)
     ttk.Label(owner_row, textvariable=owner_feedback, style="Sub.TLabel").pack(side="left")
 
     def paste_owner() -> None:
@@ -1321,7 +1082,6 @@ async def run_gui(app) -> None:
         side="right", padx=6
     )
 
-    # ---------- 窗口关闭与主循环 ----------
     closed = False
 
     def on_close() -> None:
@@ -1330,18 +1090,224 @@ async def run_gui(app) -> None:
 
     root.protocol("WM_DELETE_WINDOW", on_close)
     ttk.Button(page_settings, text=_("关闭图形界面"), command=on_close).pack(
-        anchor="e", padx=12, pady=16
+        anchor="e", padx=18, pady=18
     )
 
+    # ---------- 登录弹窗 ----------
+    def paint_login_dialog() -> None:
+        if not login_dlg:
+            return
+        p = pal()
+        login_dlg["top"].configure(background=p["bg"])
+        login_dlg["info"].configure(background=p["info_bg"])
+        for widget in login_dlg["labels"]:
+            widget.configure(background=p["bg"], foreground=p["fg"])
+        login_dlg["info_text"].configure(
+            background=p["info_bg"], foreground=p["fg"]
+        )
+        for widget in login_dlg["subs"]:
+            widget.configure(background=p["bg"], foreground=p["sub"])
+        login_dlg["cookie_text"].configure(
+            background=p["panel"],
+            foreground=p["fg"],
+            insertbackground=p["fg"],
+            highlightbackground=p["border"],
+        )
+        login_dlg["divider"].configure(background=p["bg"])
+        for line in login_dlg["lines"]:
+            line.configure(background=p["border"])
+
+    def close_login_dialog() -> None:
+        if core.login["state"] in ("starting", "waiting"):
+            core.cancel_browser_login()
+        if login_dlg:
+            try:
+                login_dlg["top"].destroy()
+            except Exception:
+                pass
+            login_dlg.clear()
+
+    def open_login_dialog() -> None:
+        if login_dlg:
+            login_dlg["top"].lift()
+            return
+        p = pal()
+        top = tk.Toplevel(root)
+        top.title(_("抖音登录"))
+        top.geometry("540x510")
+        top.resizable(False, False)
+        top.transient(root)
+        top.configure(background=p["bg"])
+        labels: list = []
+        subs: list = []
+
+        def make_label(parent, **kwargs):
+            widget = tk.Label(parent, **kwargs)
+            labels.append(widget)
+            return widget
+
+        head = tk.Frame(top, background=p["bg"])
+        head.pack(fill="x", padx=18, pady=(14, 4))
+        make_label(
+            head, text=_("抖音登录"), font=("Microsoft YaHei UI", 13, "bold")
+        ).pack(side="left")
+        tk.Button(
+            head,
+            text="✕",
+            relief="flat",
+            bd=0,
+            background=p["bg"],
+            foreground=p["fg"],
+            command=close_login_dialog,
+        ).pack(side="right")
+        make_label(
+            top, text=_("扫码登录（推荐）"), font=("Microsoft YaHei UI", 11, "bold")
+        ).pack(anchor="w", padx=18, pady=(8, 6))
+        info = tk.Frame(top, background=p["info_bg"])
+        info.pack(fill="x", padx=18)
+        info_text = tk.Label(
+            info,
+            text=_(
+                "ⓘ  点击下方按钮打开登录窗口，扫码并完成二次验证后，"
+                "程序会自动读取 Cookie 并关闭窗口。"
+            ),
+            wraplength=470,
+            justify="left",
+            background=p["info_bg"],
+            foreground=p["fg"],
+            font=("Microsoft YaHei UI", 10),
+        )
+        info_text.pack(anchor="w", padx=12, pady=10)
+        btn_dlg_login = tk.Button(
+            top,
+            text=_("打开登录窗口"),
+            relief="flat",
+            bd=0,
+            pady=9,
+            cursor="hand2",
+            background=p["accent"],
+            foreground="#FFFFFF",
+            activebackground=p["accent_active"],
+            font=("Microsoft YaHei UI", 11, "bold"),
+        )
+        btn_dlg_login.pack(fill="x", padx=18, pady=(12, 4))
+        login_row = tk.Frame(top, background=p["bg"])
+        login_row.pack(fill="x", padx=18)
+        dlg_login_var = tk.StringVar()
+        dlg_login_label = tk.Label(
+            login_row, textvariable=dlg_login_var, font=("Microsoft YaHei UI", 9)
+        )
+        subs.append(dlg_login_label)
+        dlg_login_label.pack(side="left")
+        btn_dlg_cancel = ttk.Button(login_row, text=_("取消登录"))
+        btn_dlg_cancel.pack(side="right")
+        divider = tk.Frame(top, background=p["bg"])
+        divider.pack(fill="x", padx=18, pady=(12, 4))
+        line1 = tk.Frame(divider, height=1, background=p["border"])
+        line1.pack(side="left", fill="x", expand=True)
+        divider_label = tk.Label(
+            divider, text=_("  或者手动粘贴 Cookie  "), font=("Microsoft YaHei UI", 9)
+        )
+        subs.append(divider_label)
+        divider_label.pack(side="left")
+        line2 = tk.Frame(divider, height=1, background=p["border"])
+        line2.pack(side="left", fill="x", expand=True)
+        hint = tk.Label(
+            top,
+            text=_("从浏览器复制完整 Cookie 粘贴到下面（需包含 sessionid）："),
+            font=("Microsoft YaHei UI", 9),
+        )
+        subs.append(hint)
+        hint.pack(anchor="w", padx=18, pady=(4, 4))
+        cookie_text = tk.Text(
+            top,
+            height=5,
+            wrap="word",
+            font=("Consolas", 9),
+            relief="flat",
+            bd=0,
+            highlightthickness=1,
+        )
+        cookie_text.pack(fill="x", padx=18)
+        bottom = tk.Frame(top, background=p["bg"])
+        bottom.pack(fill="x", padx=18, pady=12)
+        dlg_cookie_var = tk.StringVar()
+        dlg_cookie_label = tk.Label(
+            bottom, textvariable=dlg_cookie_var, font=("Microsoft YaHei UI", 9)
+        )
+        subs.append(dlg_cookie_label)
+        dlg_cookie_label.pack(side="left")
+        btn_dlg_save = ttk.Button(bottom, text=_("保存并校验"), style="Accent.TButton")
+        btn_dlg_save.pack(side="right")
+        ttk.Button(bottom, text=_("从剪贴板粘贴")).pack(side="right", padx=6)
+
+        def paste_cookie() -> None:
+            try:
+                text = root.clipboard_get()
+            except tk.TclError:
+                text = ""
+            cookie_text.delete("1.0", "end")
+            if text:
+                cookie_text.insert("1.0", text)
+
+        bottom.winfo_children()[-1].configure(command=paste_cookie)
+
+        def start_login() -> None:
+            async def _login():
+                await core.start_browser_login()
+                refresh_status()
+
+            spawn(
+                _login(),
+                lambda e: dlg_login_var.set(_("登录失败：{error}").format(error=e)),
+            )
+
+        btn_dlg_login.configure(command=start_login)
+        btn_dlg_cancel.configure(command=core.cancel_browser_login)
+
+        def save_cookie() -> None:
+            async def _save():
+                ok, message = await core.save_cookie(cookie_text.get("1.0", "end"))
+                dlg_cookie_var.set(message)
+                if ok:
+                    refresh_status()
+
+            spawn(
+                _save(),
+                lambda e: dlg_cookie_var.set(_("保存失败：{error}").format(error=e)),
+            )
+
+        btn_dlg_save.configure(command=save_cookie)
+        top.protocol("WM_DELETE_WINDOW", close_login_dialog)
+        login_dlg.update(
+            {
+                "top": top,
+                "info": info,
+                "info_text": info_text,
+                "labels": labels,
+                "subs": subs,
+                "cookie_text": cookie_text,
+                "divider": divider,
+                "lines": [line1, line2],
+                "login_var": dlg_login_var,
+                "btn_login": btn_dlg_login,
+                "btn_cancel": btn_dlg_cancel,
+            }
+        )
+
+    btn_open_login.configure(command=open_login_dialog)
+
+    # ---------- 状态同步与主循环 ----------
+    show_page("download")
     apply_theme()
     refresh_status()
     refresh_authors()
 
     log_seen = 0
-    last_account_state = None
+    last_login_state = None
 
     def sync_ui() -> None:
-        nonlocal log_seen, last_account_state
+        nonlocal log_seen, last_login_state
         state = core.job_state()
         if state["running"]:
             step_var.set(
@@ -1369,48 +1335,26 @@ async def run_gui(app) -> None:
                 log_text.see("end")
             log_seen = len(lines)
         running = state["running"]
-        acct = core.account
-        acct_loading = acct["state"] == "loading"
-        btn_collection.configure(
-            state="disabled" if (running or acct_loading) else "normal"
-        )
-        btn_music.configure(
-            state="disabled" if (running or acct_loading) else "normal"
-        )
+        btn_collection.configure(state="disabled" if running else "normal")
+        btn_music.configure(state="disabled" if running else "normal")
         btn_stop.configure(state="normal" if running else "disabled")
-        # 主页作品：状态文字与列表刷新
-        if acct["message"]:
-            if acct["state"] == "done" and acct["author"]:
-                account_feedback.set(
-                    "{author} · {message}".format(
-                        author=acct["author"], message=acct["message"]
-                    )
-                )
-            else:
-                account_feedback.set(acct["message"])
-        if acct["state"] != last_account_state:
-            last_account_state = acct["state"]
-            if acct["state"] == "done":
-                fill_account_tree(acct["rows"])
-            elif acct["state"] == "loading":
-                acct_tree.delete(*acct_tree.get_children())
-                checked_ids.clear()
-                update_account_button()
-        btn_fetch.configure(
-            state="disabled" if (running or acct_loading) else "normal"
-        )
-        btn_account_download.configure(
-            state="disabled"
-            if (running or acct["state"] != "done" or not checked_ids)
-            else "normal"
-        )
-        # 扫码登录：状态文字与按钮
+        # 登录状态：侧栏与弹窗同步
         login = core.login
-        if login["message"]:
-            login_feedback.set(login["message"])
-        login_busy = login["state"] in ("starting", "waiting")
-        btn_login.configure(state="disabled" if login_busy else "normal")
-        btn_login_cancel.configure(state="normal" if login_busy else "disabled")
+        if login["state"] != last_login_state:
+            last_login_state = login["state"]
+            if login["state"] in ("done", "error"):
+                refresh_status()
+        if login_dlg:
+            if login["message"]:
+                login_dlg["login_var"].set(login["message"])
+            busy = login["state"] in ("starting", "waiting")
+            login_dlg["btn_login"].configure(
+                state="disabled" if busy else "normal",
+                text=_("等待登录中…") if busy else _("打开登录窗口"),
+            )
+            login_dlg["btn_cancel"].configure(
+                state="normal" if busy else "disabled"
+            )
 
     try:
         while not closed:
