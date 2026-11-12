@@ -500,6 +500,30 @@ def _set_console_visible(visible: bool) -> None:
         pass
 
 
+def _set_titlebar_dark(root, dark: bool) -> None:
+    """深色模式时把 Windows 窗口标题栏也调成深色，别上面一条白。
+
+    用系统 DWM 接口（沉浸式深色模式开关）；老版本 Windows 的
+    属性号不同，两个都试一遍，失败就静悄悄算了。
+    """
+    try:
+        import ctypes
+        import sys
+
+        if sys.platform != "win32":
+            return
+        hwnd = ctypes.windll.user32.GetParent(root.winfo_id()) or root.winfo_id()
+        value = ctypes.c_int(1 if dark else 0)
+        for attribute in (20, 19):
+            result = ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, attribute, ctypes.byref(value), ctypes.sizeof(value)
+            )
+            if result == 0:
+                break
+    except Exception:
+        pass
+
+
 # ---------- 窗口层（tkinter 在此惰性导入，导入本模块不需要显示器） ----------
 
 _PALETTES = {
@@ -609,6 +633,10 @@ async def run_gui(app) -> None:
     pages: dict[str, ttk.Frame] = {}
     current_page = tk.StringVar(value="download")
     login_dlg: dict = {}  # 登录弹窗的控件引用（没打开时为空）
+    # 设置页上的三行状态（登录/外观/下载目录都归设置页管）
+    theme_text_var = tk.StringVar()
+    set_login_var = tk.StringVar()
+    set_root_var = tk.StringVar()
 
     def pal() -> dict:
         return _PALETTES["dark" if dark else "light"]
@@ -644,6 +672,12 @@ async def run_gui(app) -> None:
             background=p["bg"],
             foreground=p["fg"],
             font=("Microsoft YaHei UI", 13, "bold"),
+        )
+        style.configure(
+            "Section.TLabel",
+            background=p["bg"],
+            foreground=p["fg"],
+            font=("Microsoft YaHei UI", 11, "bold"),
         )
         style.configure(
             "TButton",
@@ -722,12 +756,8 @@ async def run_gui(app) -> None:
                 background=p["sidebar"],
                 foreground=p["sub"] if is_sub else p["fg"],
             )
-        btn_open_login.configure(
-            background=p["accent"],
-            foreground="#FFFFFF",
-            activebackground=p["accent_active"],
-        )
-        theme_button.configure(text=_("☀️ 浅色") if dark else _("🌙 深色"))
+        theme_text_var.set(_("☀️ 切换到浅色") if dark else _("🌙 切换到深色"))
+        _set_titlebar_dark(root, dark)
         if login_dlg:
             paint_login_dialog()
 
@@ -797,57 +827,17 @@ async def run_gui(app) -> None:
         button.pack(fill="x", padx=8, pady=2)
         nav_buttons[key] = button
 
-    side_bottom = tk.Frame(sidebar)
-    side_frames.append(side_bottom)
-    side_bottom.pack(side="bottom", fill="x", padx=8, pady=12)
-    login_state_var = tk.StringVar(value=_("登录：未设置 Cookie"))
-    side_state = tk.Label(
-        side_bottom, textvariable=login_state_var, anchor="w", wraplength=150
-    )
-    side_state.pack(fill="x", padx=8, pady=(0, 6))
-    side_labels.append((side_state, True))
-    btn_open_login = tk.Button(
-        side_bottom,
-        text=_("登录抖音"),
-        relief="flat",
-        bd=0,
-        pady=8,
-        cursor="hand2",
-        font=("Microsoft YaHei UI", 10, "bold"),
-    )
-    btn_open_login.pack(fill="x")
-    theme_button = ttk.Button(side_bottom, text=_("🌙 深色"))
-    theme_button.pack(fill="x", pady=(8, 0))
-
-    def toggle_theme() -> None:
-        nonlocal dark
-        dark = not dark
-        core.set_theme_pref("dark" if dark else "light")
-        apply_theme()
-
-    theme_button.configure(command=toggle_theme)
-
     # ---------- 右侧内容区 ----------
     content = ttk.Frame(root)
     content.pack(side="left", fill="both", expand=True)
-    status_var = tk.StringVar()
-    ttk.Label(content, textvariable=status_var, style="Sub.TLabel").pack(
-        anchor="w", padx=18, pady=(12, 2)
-    )
 
     def refresh_status() -> None:
+        # 登录状态和下载目录都显示在「设置」页里
         info = core.status()
-        status_var.set(
-            _("Cookie：{cookie} · 下载目录：{root}").format(
-                cookie=_("已设置") if info["cookie_state"] else _("未设置"),
-                root=info["root"],
-            )
+        set_login_var.set(
+            _("Cookie：已设置") if info["cookie_state"] else _("Cookie：未设置")
         )
-        login_state_var.set(
-            _("登录：已设置 Cookie")
-            if info["cookie_state"]
-            else _("登录：未设置 Cookie")
-        )
+        set_root_var.set(str(info["root"]))
 
     def make_page(key: str) -> ttk.Frame:
         frame = ttk.Frame(content)
@@ -870,16 +860,20 @@ async def run_gui(app) -> None:
     btn_collection = ttk.Button(
         buttons, text=_("批量下载收藏作品"), style="Accent.TButton"
     )
-    btn_collection.pack(side="left", expand=True, fill="x", padx=(0, 6))
+    btn_collection.pack(side="left", padx=(0, 10))
     btn_music = ttk.Button(buttons, text=_("批量下载收藏音乐"), style="Accent.TButton")
-    btn_music.pack(side="left", expand=True, fill="x", padx=(6, 0))
+    btn_music.pack(side="left")
     step_var = tk.StringVar(value=_("点上面的按钮开始下载"))
     ttk.Label(page_job, textvariable=step_var).pack(anchor="w", padx=18)
     log_text = tk.Text(
         page_job,
         height=16,
         wrap="word",
-        font=("Consolas", 9),
+        font=("Microsoft YaHei UI", 10),
+        spacing1=3,
+        spacing3=3,
+        padx=12,
+        pady=10,
         relief="flat",
         bd=0,
         highlightthickness=1,
@@ -1039,29 +1033,61 @@ async def run_gui(app) -> None:
     btn_delete.configure(command=delete_selected)
     btn_clear.configure(command=clear_all)
 
+    def toggle_theme() -> None:
+        nonlocal dark
+        dark = not dark
+        core.set_theme_pref("dark" if dark else "light")
+        apply_theme()
+
     # ---------- 页 4：设置 ----------
     page_settings = make_page("settings")
     ttk.Label(page_settings, text=_("设置"), style="Title.TLabel").pack(
-        anchor="w", padx=18, pady=(10, 2)
+        anchor="w", padx=20, pady=(14, 4)
     )
+    # 抖音登录：入口和状态都在设置页
+    ttk.Label(page_settings, text=_("抖音登录"), style="Section.TLabel").pack(
+        anchor="w", padx=20, pady=(12, 2)
+    )
+    ttk.Label(page_settings, textvariable=set_login_var).pack(anchor="w", padx=20)
+    login_row = ttk.Frame(page_settings)
+    login_row.pack(fill="x", padx=20, pady=8)
+    btn_settings_login = ttk.Button(
+        login_row, text=_("登录抖音"), style="Accent.TButton"
+    )
+    btn_settings_login.pack(side="left")
     ttk.Label(
-        page_settings,
-        text=_("登录在左下角的「登录抖音」按钮里：扫码登录或粘贴 Cookie 都在那个弹窗里。"),
+        login_row,
+        text=_("点开弹窗：扫码登录，或者粘贴 Cookie 保存并校验。"),
         style="Sub.TLabel",
-    ).pack(anchor="w", padx=18)
-    ttk.Label(page_settings, text=_("我的抖音主页链接"), style="Title.TLabel").pack(
-        anchor="w", padx=18, pady=(18, 2)
+    ).pack(side="left", padx=10)
+    # 外观：深色/浅色也归设置页
+    ttk.Label(page_settings, text=_("外观"), style="Section.TLabel").pack(
+        anchor="w", padx=20, pady=(16, 2)
+    )
+    ttk.Button(
+        page_settings, textvariable=theme_text_var, command=toggle_theme
+    ).pack(anchor="w", padx=20, pady=6)
+    # 下载目录（只看不动）
+    ttk.Label(page_settings, text=_("下载目录"), style="Section.TLabel").pack(
+        anchor="w", padx=20, pady=(16, 2)
+    )
+    ttk.Label(page_settings, textvariable=set_root_var, style="Sub.TLabel").pack(
+        anchor="w", padx=20
+    )
+    # 我的抖音主页链接
+    ttk.Label(page_settings, text=_("我的抖音主页链接"), style="Section.TLabel").pack(
+        anchor="w", padx=20, pady=(16, 2)
     )
     ttk.Label(
         page_settings,
         text=_("下载「收藏作品」要用：打开抖音网页版你的主页，复制地址栏链接粘贴到这里。"),
         style="Sub.TLabel",
-    ).pack(anchor="w", padx=18)
+    ).pack(anchor="w", padx=20)
     owner_var = tk.StringVar(value=core.status()["owner_url"])
-    ttk.Entry(page_settings, textvariable=owner_var).pack(fill="x", padx=18, pady=8)
+    ttk.Entry(page_settings, textvariable=owner_var).pack(fill="x", padx=20, pady=8)
     owner_feedback = tk.StringVar()
     owner_row = ttk.Frame(page_settings)
-    owner_row.pack(fill="x", padx=18)
+    owner_row.pack(fill="x", padx=20)
     ttk.Label(owner_row, textvariable=owner_feedback, style="Sub.TLabel").pack(side="left")
 
     def paste_owner() -> None:
@@ -1090,7 +1116,7 @@ async def run_gui(app) -> None:
 
     root.protocol("WM_DELETE_WINDOW", on_close)
     ttk.Button(page_settings, text=_("关闭图形界面"), command=on_close).pack(
-        anchor="e", padx=18, pady=18
+        anchor="e", padx=20, pady=18
     )
 
     # ---------- 登录弹窗 ----------
@@ -1295,7 +1321,7 @@ async def run_gui(app) -> None:
             }
         )
 
-    btn_open_login.configure(command=open_login_dialog)
+    btn_settings_login.configure(command=open_login_dialog)
 
     # ---------- 状态同步与主循环 ----------
     show_page("download")
