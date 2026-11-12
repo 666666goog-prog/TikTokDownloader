@@ -181,14 +181,12 @@ class TikTokDownloader:
 
     async def disclaimer(self):
         if not self.config["Disclaimer"]:
-            await self.__init_language()
-            self.console.print(_(DISCLAIMER_TEXT), style=MASTER)
-            if self.console.input(
-                _("是否已仔细阅读上述免责声明(YES/NO): ")
-            ).upper() not in ("Y", "YES"):
-                return False
+            # 启动时不再弹「选择语言」和「输入 YES 同意免责声明」
+            # 两个界面：语言默认简体中文，免责声明视为已阅读，
+            # 双击打开直接进入程序（主菜单里仍可手动切换语言）
+            if self.option.get("Language") != "zh_CN":
+                await self._update_language("zh_CN")
             await self.database.update_config_data("Disclaimer", 1)
-            self.console.print()
         return True
 
     async def __init_language(self):
